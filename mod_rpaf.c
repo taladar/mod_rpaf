@@ -406,7 +406,11 @@ static int rpaf_post_read_request(request_rec *r) {
             apr_table_set(r->notes, "rpaf_https", httpsvalue);
             apr_table_set(r->connection->notes, "rpaf_https", httpsvalue);
             apr_table_set(r->subprocess_env   , "HTTPS"     , httpsvalue);
-            scheme = cfg->https_scheme;
+            if(strcmp(httpsvalue, "on") == 0 || strcmp(httpsvalue, "On") == 0) {
+              scheme = cfg->https_scheme;
+            } else {
+              scheme = cfg->orig_scheme;
+            }
         }
 
         #if AP_SERVER_MINORVERSION_NUMBER > 1 && AP_SERVER_PATCHLEVEL_NUMBER > 2
