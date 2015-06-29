@@ -385,6 +385,10 @@ static int rpaf_post_read_request(request_rec *r) {
         if (!httpsvalue) {
             header_https = "X-Forwarded-Proto";
             httpsvalue   = apr_table_get(r->headers_in, header_https);
+            if (!httpsvalue) {
+              header_https = "X-Forwarded-Protocol";
+              httpsvalue   = apr_table_get(r->headers_in, header_https);
+            }
             if (httpsvalue) {
                 if (strcmp(httpsvalue, cfg->https_scheme) == 0) {
                     /* set a per-request note to get around an issue with mod_rewrite
