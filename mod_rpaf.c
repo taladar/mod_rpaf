@@ -380,7 +380,7 @@ static int rpaf_post_read_request(request_rec *r) {
         if (!httpsvalue) {
             header_https = "X-HTTPS";
             httpsvalue   = apr_table_get(r->headers_in, header_https);
-        }        
+        }
 
         if (!httpsvalue) {
             header_https = "X-Forwarded-Proto";
