@@ -4,28 +4,28 @@ libapache2-mod-rpaf (0.8.4-1+wheezy1~saltation.4) UNRELEASED; urgency=medium
   * support X-Forwarded-Protocol
   * do not set HTTPS,... at all if headers indicate HTTPS is off
 
- -- Matthias Hörmann <hoermann@saltation.de>  Tue, 24 Feb 2015 10:49:02 +0100
+ -- Matthias Hörmann <mhoermann@saltation.de>  Tue, 24 Feb 2015 10:49:02 +0100
 
 libapache2-mod-rpaf (0.8.4-1+wheezy1~saltation.3) UNRELEASED; urgency=medium
 
   * Non-maintainer upload.
   * Fix in last fix
 
- -- Matthias Hörmann <hoermann@saltation.de>  Wed, 01 Oct 2014 10:30:16 +0200
+ -- Matthias Hörmann <mhoermann@saltation.de>  Wed, 01 Oct 2014 10:30:16 +0200
 
 libapache2-mod-rpaf (0.8.4-1+wheezy1~saltation.2) UNRELEASED; urgency=medium
 
   * Non-maintainer upload.
   * Fixed behavior for X-Forwarded-HTTPS: off
 
- -- Matthias Hörmann <hoermann@saltation.de>  Wed, 01 Oct 2014 10:05:34 +0200
+ -- Matthias Hörmann <mhoermann@saltation.de>  Wed, 01 Oct 2014 10:05:34 +0200
 
 libapache2-mod-rpaf (0.8.4-1+wheezy1~saltation.1) UNRELEASED; urgency=medium
 
   * Non-maintainer upload.
   * use https://github.com/meulop/mod_rpaf/tree/master with per request fix
 
- -- Matthias Hörmann <hoermann@saltation.de>  Mon, 29 Sep 2014 14:01:10 +0200
+ -- Matthias Hörmann <mhoermann@saltation.de>  Mon, 29 Sep 2014 14:01:10 +0200
 
 libapache2-mod-rpaf (0.8.4-1+wheezy1~saltation.0) UNRELEASED; urgency=medium
 
@@ -33,7 +33,7 @@ libapache2-mod-rpaf (0.8.4-1+wheezy1~saltation.0) UNRELEASED; urgency=medium
   * https://raw.githubusercontent.com/gnif/mod_rpaf/stable/mod_rpaf.c
   * RPAF_SetHTTPS support
 
- -- Matthias Hörmann <hoermann@saltation.de>  Fri, 26 Sep 2014 13:43:21 +0200
+ -- Matthias Hörmann <mhoermann@saltation.de>  Fri, 26 Sep 2014 13:43:21 +0200
 
 libapache2-mod-rpaf (0.6-7+wheezy1) stable; urgency=low
 
