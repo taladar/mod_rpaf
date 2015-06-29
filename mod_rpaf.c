@@ -407,10 +407,10 @@ static int rpaf_post_read_request(request_rec *r) {
                 scheme       = cfg->orig_scheme;
             }
         } else {
-            apr_table_set(r->notes, "rpaf_https", httpsvalue);
-            apr_table_set(r->connection->notes, "rpaf_https", httpsvalue);
-            apr_table_set(r->subprocess_env   , "HTTPS"     , httpsvalue);
             if(strcmp(httpsvalue, "on") == 0 || strcmp(httpsvalue, "On") == 0) {
+              apr_table_set(r->notes, "rpaf_https", "on");
+              apr_table_set(r->connection->notes, "rpaf_https", "on");
+              apr_table_set(r->subprocess_env   , "HTTPS"     , "on");
               scheme = cfg->https_scheme;
             } else {
               scheme = cfg->orig_scheme;
