@@ -3,15 +3,14 @@ Maintainer: Sergey B Kirpichev <skirpichev@gmail.com>
 Section: httpd
 Priority: extra
 Standards-Version: 3.9.6
-Build-Depends: apache2-threaded-dev, debhelper (>= 9)
+Build-Depends: apache2-dev, debhelper (>= 9), dh-apache2
 Vcs-Git: git://git.debian.org/git/collab-maint/libapache2-mod-rpaf.git
 Vcs-Browser: http://git.debian.org/?p=collab-maint/libapache2-mod-rpaf.git;a=summary
 Homepage: http://stderr.net/apache/rpaf/
-DM-Upload-Allowed: yes
 
 Package: libapache2-mod-rpaf
 Architecture: any
-Depends: apache2 | apache2-mpm, ${shlibs:Depends}, ${misc:Depends}
+Depends: ${shlibs:Depends}, ${misc:Depends}
 Description: module for Apache2 which takes the last IP from the 'X-Forwarded-For' header
  rpaf is short for reverse proxy add forward.
  .
