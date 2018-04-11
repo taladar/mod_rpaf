@@ -16,9 +16,9 @@
 
 #include "ap_release.h"
 #if AP_SERVER_MAJORVERSION_NUMBER >= 2 && AP_SERVER_MINORVERSION_NUMBER >= 4
-  #define DEF_IP   connection->client_ip
-  #define DEF_ADDR connection->client_addr
-  #define DEF_POOL connection->pool
+  #define DEF_IP   useragent_ip
+  #define DEF_ADDR useragent_addr
+  #define DEF_POOL pool
 #else
   #define DEF_IP   connection->remote_ip
   #define DEF_ADDR connection->remote_addr
@@ -48,14 +48,12 @@ typedef struct {
     apr_array_header_t *proxy_ips;
     const char         *orig_scheme;
     const char         *https_scheme;
-    int                orig_port;
     int                forbid_if_not_proxy;
     int                clean_headers;
 } rpaf_server_cfg;
 
 typedef struct {
     const char  *old_ip;
-    apr_sockaddr_t old_addr;
     request_rec *r;
 } rpaf_cleanup_rec;
 
@@ -76,7 +74,6 @@ static void *rpaf_create_server_cfg(apr_pool_t *p, server_rec *s) {
     #endif
 
     cfg->https_scheme = apr_pstrdup(p, "https");
-    cfg->orig_port = s->port;
 
     return (void *)cfg;
 }
@@ -218,7 +215,7 @@ static int is_in_array(apr_sockaddr_t *remote_addr, apr_array_header_t *proxy_ip
 static apr_status_t rpaf_cleanup(void *data) {
     rpaf_cleanup_rec *rcr = (rpaf_cleanup_rec *)data;
     rcr->r->DEF_IP = apr_pstrdup(rcr->r->connection->pool, rcr->old_ip);
-    memcpy(rcr->r->DEF_ADDR, &rcr->old_addr, sizeof(apr_sockaddr_t));
+    rcr->r->DEF_ADDR->sa.sin.sin_addr.s_addr = apr_inet_addr(rcr->r->DEF_IP);
     return APR_SUCCESS;
 }
 
@@ -342,7 +339,6 @@ static int rpaf_post_read_request(request_rec *r) {
     rcr->r = r;
     apr_pool_cleanup_register(r->pool, (void *)rcr, rpaf_cleanup, apr_pool_cleanup_null);
     r->DEF_IP = apr_pstrdup(r->DEF_POOL, last_val);
-    memcpy(&rcr->old_addr, r->DEF_ADDR, sizeof(apr_sockaddr_t));
 
     tmppool = r->DEF_ADDR->pool;
     tmpport = r->DEF_ADDR->port;
@@ -434,11 +430,12 @@ static int rpaf_post_read_request(request_rec *r) {
         }
 
         if (!portvalue) {
-            header_port     = NULL;
-            r->server->port = cfg->orig_port;
+            header_port            = NULL;
+            r->parsed_uri.port     = 0;
+            r->parsed_uri.port_str = NULL;
         } else {
-            r->server->port    = atoi(portvalue);
-            r->parsed_uri.port = r->server->port;
+            r->parsed_uri.port     = atoi(portvalue);
+            r->parsed_uri.port_str = apr_pstrcat(r->pool, ":", portvalue, NULL);
         }
     }
 
