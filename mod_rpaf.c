@@ -99,7 +99,7 @@ static int rpaf_looks_like_ip(const char *ip) {
 
 static const char *rpaf_set_proxy_ip(cmd_parms *cmd, void *dummy, const char *proxy_ip) {
     char *ip, *mask;
-    apr_ipsubnet_t **s
+    apr_ipsubnet_t **sub;
     apr_status_t rv;
     server_rec *s = cmd->server;
     rpaf_server_cfg *cfg = (rpaf_server_cfg *)ap_get_module_config(s->module_config,
