@@ -208,7 +208,7 @@ static int is_in_array(apr_sockaddr_t *remote_addr, apr_array_header_t *proxy_ip
 static apr_status_t rpaf_cleanup(void *data) {
     rpaf_cleanup_rec *rcr = (rpaf_cleanup_rec *)data;
     rcr->r->connection->client_ip = apr_pstrdup(rcr->r->connection->pool, rcr->old_ip);
-    rcr->r->connection->client_addr->sa.sin.sin_addr.s_addr = apr_inet_addr(rcr->r->connection_client_ip);
+    rcr->r->connection->client_addr->sa.sin.sin_addr.s_addr = apr_inet_addr(rcr->r->connection->client_ip);
     rcr->r->useragent_ip = apr_pstrdup(rcr->r->connection->pool, rcr->old_ip);
     rcr->r->useragent_addr->sa.sin.sin_addr.s_addr = apr_inet_addr(rcr->r->useragent_ip);
     return APR_SUCCESS;
