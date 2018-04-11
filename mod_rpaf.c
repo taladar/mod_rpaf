@@ -15,15 +15,6 @@
 */
 
 #include "ap_release.h"
-#if AP_SERVER_MAJORVERSION_NUMBER >= 2 && AP_SERVER_MINORVERSION_NUMBER >= 4
-  #define DEF_IP   useragent_ip
-  #define DEF_ADDR useragent_addr
-  #define DEF_POOL pool
-#else
-  #define DEF_IP   connection->remote_ip
-  #define DEF_ADDR connection->remote_addr
-  #define DEF_POOL connection->pool
-#endif
 
 #include "httpd.h"
 #include "http_config.h"
@@ -48,6 +39,7 @@ typedef struct {
     apr_array_header_t *proxy_ips;
     const char         *orig_scheme;
     const char         *https_scheme;
+    int                orig_port;
     int                forbid_if_not_proxy;
     int                clean_headers;
 } rpaf_server_cfg;
@@ -74,6 +66,7 @@ static void *rpaf_create_server_cfg(apr_pool_t *p, server_rec *s) {
     #endif
 
     cfg->https_scheme = apr_pstrdup(p, "https");
+    cfg->orig_port = s->port;
 
     return (void *)cfg;
 }
@@ -106,7 +99,7 @@ static int rpaf_looks_like_ip(const char *ip) {
 
 static const char *rpaf_set_proxy_ip(cmd_parms *cmd, void *dummy, const char *proxy_ip) {
     char *ip, *mask;
-    apr_ipsubnet_t **sub;
+    apr_ipsubnet_t **s
     apr_status_t rv;
     server_rec *s = cmd->server;
     rpaf_server_cfg *cfg = (rpaf_server_cfg *)ap_get_module_config(s->module_config,
@@ -130,7 +123,7 @@ static const char *rpaf_set_proxy_ip(cmd_parms *cmd, void *dummy, const char *pr
     else
     {
       return apr_pstrcat(cmd->pool, "mod_rpaf: Error parsing IP \"", proxy_ip, "\" in ",
-                         cmd->cmd->name, ". Failed basic parsing.", NULL);     
+                         cmd->cmd->name, ". Failed basic parsing.", NULL);
     }
 
     return NULL;
@@ -214,8 +207,10 @@ static int is_in_array(apr_sockaddr_t *remote_addr, apr_array_header_t *proxy_ip
 
 static apr_status_t rpaf_cleanup(void *data) {
     rpaf_cleanup_rec *rcr = (rpaf_cleanup_rec *)data;
-    rcr->r->DEF_IP = apr_pstrdup(rcr->r->connection->pool, rcr->old_ip);
-    rcr->r->DEF_ADDR->sa.sin.sin_addr.s_addr = apr_inet_addr(rcr->r->DEF_IP);
+    rcr->r->connection->client_ip = apr_pstrdup(rcr->r->connection->pool, rcr->old_ip);
+    rcr->r->connection->client_addr->sa.sin.sin_addr.s_addr = apr_inet_addr(rcr->r->connection_client_ip);
+    rcr->r->useragent_ip = apr_pstrdup(rcr->r->connection->pool, rcr->old_ip);
+    rcr->r->useragent_addr->sa.sin.sin_addr.s_addr = apr_inet_addr(rcr->r->useragent_ip);
     return APR_SUCCESS;
 }
 
@@ -226,7 +221,7 @@ static char *last_not_in_array(request_rec *r, apr_array_header_t *forwarded_for
     char **fwd_ips, *proxy_list;
     int i, earliest_legit_i = 0;
 
-    proxy_list = apr_pstrdup(r->pool, r->DEF_IP);
+    proxy_list = apr_pstrdup(r->pool, r->client_ip);
     fwd_ips = (char **)forwarded_for->elts;
 
     for (i = (forwarded_for->nelts); i > 0; ) {
@@ -279,7 +274,7 @@ static int rpaf_post_read_request(request_rec *r) {
     }
 
     /* check if the remote_addr is in the allowed proxy IP list */
-    if (is_in_array(r->DEF_ADDR, cfg->proxy_ips) != 1) {
+    if (is_in_array(r->connection->client_addr, cfg->proxy_ips) != 1) {
         if (cfg->forbid_if_not_proxy)
             return HTTP_FORBIDDEN;
         return DECLINED;
@@ -335,17 +330,20 @@ static int rpaf_post_read_request(request_rec *r) {
     }
 
     rpaf_cleanup_rec *rcr = (rpaf_cleanup_rec *)apr_pcalloc(r->pool, sizeof(rpaf_cleanup_rec));
-    rcr->old_ip = apr_pstrdup(r->DEF_POOL, r->DEF_IP);
+    rcr->old_ip = apr_pstrdup(r->connection->pool, r->connection->client_ip);
     rcr->r = r;
     apr_pool_cleanup_register(r->pool, (void *)rcr, rpaf_cleanup, apr_pool_cleanup_null);
-    r->DEF_IP = apr_pstrdup(r->DEF_POOL, last_val);
+    r->connection->client_ip = apr_pstrdup(r->connection->pool, last_val);
+    r->useragent_ip = apr_pstrdup(r->pool, last_val);
 
-    tmppool = r->DEF_ADDR->pool;
-    tmpport = r->DEF_ADDR->port;
+    tmppool = r->useragent_addr->pool;
+    tmpport = r->useragent_addr->port;
     apr_sockaddr_t *tmpsa;
-    int ret = apr_sockaddr_info_get(&tmpsa, r->DEF_IP, APR_UNSPEC, tmpport, 0, tmppool);
-    if (ret == APR_SUCCESS)
-        memcpy(r->DEF_ADDR, tmpsa, sizeof(apr_sockaddr_t));
+    int ret = apr_sockaddr_info_get(&tmpsa, r->useragent_ip, APR_UNSPEC, tmpport, 0, tmppool);
+    if (ret == APR_SUCCESS) {
+      memcpy(r->connection->client_addr, tmpsa, sizeof(apr_sockaddr_t));
+      memcpy(r->useragent_addr, tmpsa, sizeof(apr_sockaddr_t));
+    }
     if (cfg->sethostname) {
         const char *hostvalue;
         header_host = "X-Forwarded-Host";
@@ -431,9 +429,11 @@ static int rpaf_post_read_request(request_rec *r) {
 
         if (!portvalue) {
             header_port            = NULL;
+            r->server->port        = cfg->orig_port;
             r->parsed_uri.port     = 0;
             r->parsed_uri.port_str = NULL;
         } else {
+            r->server->port        = atoi(portvalue);
             r->parsed_uri.port     = atoi(portvalue);
             r->parsed_uri.port_str = apr_pstrcat(r->pool, ":", portvalue, NULL);
         }
