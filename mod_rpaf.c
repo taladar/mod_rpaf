@@ -221,7 +221,7 @@ static char *last_not_in_array(request_rec *r, apr_array_header_t *forwarded_for
     char **fwd_ips, *proxy_list;
     int i, earliest_legit_i = 0;
 
-    proxy_list = apr_pstrdup(r->pool, r->client_ip);
+    proxy_list = apr_pstrdup(r->connection->pool, r->connection->client_ip);
     fwd_ips = (char **)forwarded_for->elts;
 
     for (i = (forwarded_for->nelts); i > 0; ) {
