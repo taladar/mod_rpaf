@@ -184,6 +184,8 @@
 // We do not need to call ap_update_vhost_given_ip since that only ever depends on the r->connection->local_addr and r->connection->local_addr->port
 // and we do not change that
 
+// r->parsed_uri.port_str should not include a colon (unlike the way it is set in gnif's fork of mod_rpaf)
+
 // We need to call ap_update_vhost_from_headers if we update r->hostname or r->parsed_uri.port_str
 
 #include "ap_release.h"
@@ -633,7 +635,7 @@ static int rpaf_post_read_request(request_rec *r) {
             r->parsed_uri.port_str = NULL;
         } else {
             r->parsed_uri.port     = atoi(portvalue);
-            r->parsed_uri.port_str = apr_pstrcat(r->pool, ":", portvalue, NULL);
+            r->parsed_uri.port_str = apr_pstrdup(r->pool, portvalue);
         }
         // update Host header in r->headers_in from r->hostname and r->parsed_uri.port_str
         ap_update_vhost_from_headers(r);
