@@ -1,3 +1,11 @@
+libapache2-mod-rpaf (0.8.4-1+wheezy1~saltation.9) UNRELEASED; urgency=medium
+
+  * Non-maintainer upload.
+  * fix superfluous colon in r->parsed_uri.port_str
+  * do not update Host header after setting port
+
+ -- Matthias Hörmann <mhoermann@saltation.de>  Thu, 12 Apr 2018 16:39:02 +0100
+
 libapache2-mod-rpaf (0.8.4-1+wheezy1~saltation.8) UNRELEASED; urgency=medium
 
   * Non-maintainer upload.
