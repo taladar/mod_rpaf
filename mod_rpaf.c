@@ -441,29 +441,6 @@ static char *last_not_in_array(request_rec *r, apr_array_header_t *forwarded_for
     }
 }
 
-// we need to implement this since the default only uses r->server->server_scheme and ignores r->parsed_uri.scheme
-static const char* rpaf_http_scheme(const request_rec *r) {
-  if(r->parsed_uri.scheme) {
-    if((strcmp(r->server->server_scheme, "https") == 0)) {
-      return "https";
-    } else {
-      return "http";
-    }
-  }
-
-  if (r->server->server_scheme &&
-      (strcmp(r->server->server_scheme, "https") == 0)) {
-      return "https";
-  }
-
-  return "http";
-}
-
-// we need to implement this since the default only uses r->server->server_scheme and ignores r->parsed_uri.scheme
-static apr_port_t rpaf_default_port(const request_rec *r) {
-  return apr_uri_port_of_scheme(rpaf_http_scheme(r));
-}
-
 // main entry point when mod_rpaf processes a request
 static int rpaf_post_read_request(request_rec *r) {
     // fwdvalue is the value of the X-Forwarded-For header if present
@@ -733,8 +710,6 @@ static int ssl_is_https(conn_rec *c) {
 
 static void rpaf_register_hooks(apr_pool_t *p) {
     ap_hook_post_read_request(rpaf_post_read_request, NULL, NULL, APR_HOOK_FIRST);
-    ap_hook_http_scheme(rpaf_http_scheme, NULL, NULL, APR_HOOK_FIRST);
-    ap_hook_default_port(rpaf_default_port, NULL, NULL, APR_HOOK_FIRST);
 
     /* this will only work if mod_ssl is not loaded */
     if (APR_RETRIEVE_OPTIONAL_FN(ssl_is_https) == NULL)
