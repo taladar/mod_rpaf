@@ -18,6 +18,10 @@
 
 // ===== List of C-value to user visible values mapping
 // === in modules/http/http_core.c
+// in http_scheme (fallback for ap_http_scheme if not other module overwrites it)
+//
+// uses r->server->server_scheme to determine whether it should return https or http
+//
 // in http_port (fallback for ap_default_port if no other module overwrites it)
 //
 // uses r->server->server_scheme to determine default port to return
@@ -213,7 +217,6 @@ typedef struct {
     int                setport;
     const char         *headername;
     apr_array_header_t *proxy_ips;
-    const char         *orig_scheme;
     const char         *https_scheme;
     int                forbid_if_not_proxy;
     int                clean_headers;
@@ -235,8 +238,6 @@ static void *rpaf_create_server_cfg(apr_pool_t *p, server_rec *s) {
     cfg->sethostname = 0;
     cfg->forbid_if_not_proxy = 0;
     cfg->clean_headers = 0;
-
-    cfg->orig_scheme = s->server_scheme;
 
     cfg->https_scheme = apr_pstrdup(p, "https");
 
@@ -600,25 +601,19 @@ static int rpaf_post_read_request(request_rec *r) {
                 if (strcmp(httpsvalue, cfg->https_scheme) == 0) {
                     apr_table_set(r->connection->notes, "rpaf_https", "on");
                     apr_table_set(r->subprocess_env   , "HTTPS"     , "on");
-                    scheme = cfg->https_scheme;
-                } else {
-                    scheme = cfg->orig_scheme;
+                    r->parsed_uri.scheme = apr_pstrdup(r->pool, cfg->https_scheme);
                 }
             } else {
                 header_https = NULL;
-                scheme       = cfg->orig_scheme;
             }
         } else {
             if(strcmp(httpsvalue, "on") == 0 || strcmp(httpsvalue, "On") == 0) {
               apr_table_set(r->connection->notes, "rpaf_https", "on");
               apr_table_set(r->subprocess_env   , "HTTPS"     , "on");
-              scheme = cfg->https_scheme;
-            } else {
-              scheme = cfg->orig_scheme;
+              r->parsed_uri.scheme = apr_pstrdup(r->pool, cfg->https_scheme);
             }
         }
 
-        r->parsed_uri.scheme = apr_pstrdup(r->pool, scheme);
     }
 
      if (cfg->setport) {
