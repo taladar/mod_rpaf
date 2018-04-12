@@ -187,6 +187,7 @@
 // r->parsed_uri.port_str should not include a colon (unlike the way it is set in gnif's fork of mod_rpaf)
 
 // We need to call ap_update_vhost_from_headers if we update r->hostname or r->parsed_uri.port_str
+// At least in theory, in practice in some situations we do not want to do that since it adds a port to the Host header even if the port is the default port for the scheme
 
 #include "ap_release.h"
 #include "ap_listen.h"
@@ -637,8 +638,6 @@ static int rpaf_post_read_request(request_rec *r) {
             r->parsed_uri.port     = atoi(portvalue);
             r->parsed_uri.port_str = apr_pstrdup(r->pool, portvalue);
         }
-        // update Host header in r->headers_in from r->hostname and r->parsed_uri.port_str
-        ap_update_vhost_from_headers(r);
     }
 
     if (cfg->clean_headers) {
