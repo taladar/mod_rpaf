@@ -17,6 +17,11 @@
 // Apache 2.4.19+ and 2.5
 
 // ===== List of C-value to user visible values mapping
+// === in modules/http/http_core.c
+// in http_port (fallback for ap_default_port if no other module overwrites it)
+//
+// uses r->server->server_scheme to determine default port to return
+//
 // === in server/vhost.c
 //
 // in ap_update_vhost_given_ip
