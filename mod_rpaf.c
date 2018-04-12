@@ -14,7 +14,155 @@
    limitations under the License.
 */
 
+// ===== List of C-value to user visible values mapping
+// === in server/vhost.c
+//
+// in ap_update_vhost_given_ip
+//
+// uses r->connection->local_addr
+//   on exact match sets r->connection->vhost_lookup_data
+//   on exact match sets r->connection->base_server
+// uses r->connection->local_addr->port
+//   does same as above if default server exists for this port
+// if neither exact match nor default server exists set r->connection->vhost_lookup_data to NULL
+//
+// in ap_update_vhost_from_headers
+//
+// uses r->headers_in table key Host
+// uses r->hostname over above and updates r->headers_in table key Host in that case based on r->hostname and r->parsed_uri.port_str
+// if r->connection->vhost_lookup_data is non-NULL
+//   if r->hostname is set
+//     calls check_hostalias(r)
+//   else
+//     calls check_serverpath(r)
+//
+// in check_hostalias
+// comment claims that it always uses the physical part, never one from Host header or other sources
+// uses r->hostname
+// uses r->connection->local_addr->port
+// traverses r->connection->vhost_lookup_data
+// if it finds a matching entry (host and port)
+//   sets r->server to the server field from the entry (no copy which confirms that we should never update r->server)
+//
+// in check_serverpath (only used for requests without a Host header)
+// uses r->connection->local_addr->port
+// uses r->uri to compare it to ServerPath setting
+//
+// === in server/core.c in httpd source
+//
+// in ap_get_useragent_host
+// if r->useragent_addr is unset or identical to r->connection->client_addr
+//   return result of ap_get_remote_host
+// if hostname lookups are on and r->useragent_host is unset
+//   DNS lookup r->useragent_addr to set r->useragent_host
+//   some weird double reverse lookup logic
+//   if DNS lookup fails sets r->useragent_host to empty string to indicate error
+// if r->useragent_host is not NULL and not the empty string
+//   return r->useragent_host
+// else
+//   if parameter was REMOTE_HOST or REMOTE_DOUBLE_REV return NULL
+//   else return r->useragent_ip
+//
+// in ap_get_remote_host
+// does essentially the same thing as ap_get_useragent_host only without
+// the initial check to call this function and with
+// r->remote_host instead of r_useragent_host and
+// r->connection->client_addr instead of r->useragent_addr and
+// r->client_ip instead of r->useragent_ip
+//
+// in ap_get_server_port
+//   if CanonicalName is off, DNS or unset
+//     if CanonicalPhysicalPort is on
+//       if r->parsed_uri->port_str is set
+//         return r->parsed_uri->port
+//       else
+//         if r->connection->local_addr->port is set
+//           return r->connection->local_addr->port
+//         else
+//           if r->server->port is set
+//             return r->server->port
+//           else
+//             return ap_default_port(r)
+//     else
+//       if r->parsed_uri->port_str is set
+//         return r->parsed_uri->port
+//       else
+//         if r->server->port is set
+//           return r->server->port
+//         else
+//           return ap_default_port(r)
+//   else
+//     if CanonicalPhysicalPort is on
+//       if r->connection->local_addr->port is set
+//         return r->connection->local_addr->port
+//       else
+//         if r->server->port is set
+//           return r->server->port
+//         else
+//           return ap_default_port(r)
+//     else
+//       if r->server->port is set
+//         return r->server->port
+//       else
+//         return ap_default_port(r)
+//
+// === in server/util_script.c in ap_add_common_vars in httpd source
+// SERVER_ADDR request_rec->connection->local_ip
+// SERVER_PORT ap_get_server_port(request_rec)
+// REMOTE_HOST ap_get_useragent_host(r, REMOTE_HOST, NULL)
+// REMOTE_ADDR request_rec->useragent_ip
+// REMOTE_PORT request_rec->connection->client_addr->port
+// REQUEST_SCHEME ap_http_scheme(request_rec)
+// === in modules/loggers/mod_log_config.c in log_pre_config in httpd source
+// (note, the a parameter in the handler functions is the one in {} between % and the letter)
+//
+// %h  in LogFormat ap_get_useragent_host(r, REMOTE_HOST, NULL)
+// %{c}h in LogFormat ap_get_remote_host(r->connection, r->per_dir_config, REMOTE_NAME, NULL);
+//
+// %a  in LogFormat request_rec->useragent_ip
+// %{c}a in LogFormat request_rec->connection->client_ip
+//
+// %A in LogFormat request_rec->connection->local_ip
+//
+// %V in LogFormat with setting CanonicalHostName on  r->server->server_hostname
+// %V in LogFormat with setting CanonicalHostName off r->hostname
+// %V in LogFormat with setting CanonicalHostname dns complex DNS stuff involving conn->local_host somehow (code of ap_get_server_name in server/core.c)
+//
+// %v in LogFormat r->server->server_hostname
+//
+// %p or %{canonical}p in LogFormat r->server->port or ap_default_port(r) (default port for scheme)
+// %{remote}p          in LogFormat r->user_agent_addr->port
+// %{local}p           in LogFormat r->connection->local_addr->port
+//
+// %H in LogFormat r->protocol (this is just something like HTTP/1.1 so we are not concerned with it, just listed so we do not need to discover this twice)
+//
+// === in modules/loggers/mod_journald.c in httpd sources
+// provides some variables
+// REQUEST_HOSTNAME r->hostname
+// REQUEST_USERAGENT_IP r->useragent_ip
+//
+// === in modules/aaa/mod_authz_host.c in httpd sourcec
+// apparently this uses r->useragent_ip and r->useragent_addr
+//
+// === in modules/proxy/mod_proxy_http.c in httpd sources
+// this does some weird fake request stuff with data that is really a response, not sure if this is relevant beyond not needing to discover this twice
+//
+// === in modules/proxy/proxy_util.c in httpd sources
+// adds X-Forward-For, X-Forwarded-Host and X-Forwarded-Server headers to reverse proxy requests in ap_proxy_create_hdrbrgd
+//
+// X-Forwarded-For is filled based on existing header value and r->useragent_ip
+// X-Forwarded-Host is set to value of existing X-Forwarded-Host header + value of Host header
+// X-Forwarded-Server is set to value of existing header + value of r->server->server_hostname
+
+// Notes on things I do not want to have to discover twice
+//
+// We do not need to call ap_update_vhost_given_ip since that only ever depends on the r->connection->local_addr and r->connection->local_addr->port
+// and we do not change that
+
+// We need to call ap_update_vhost_from_headers if we update r->hostname or r->parsed_uri.port_str
+
 #include "ap_release.h"
+#include "ap_listen.h"
 
 #include "httpd.h"
 #include "http_config.h"
@@ -39,13 +187,13 @@ typedef struct {
     apr_array_header_t *proxy_ips;
     const char         *orig_scheme;
     const char         *https_scheme;
-    int                orig_port;
     int                forbid_if_not_proxy;
     int                clean_headers;
 } rpaf_server_cfg;
 
 typedef struct {
-    const char  *old_ip;
+    const char  *old_useragent_ip;
+    apr_sockaddr_t old_useragent_addr;
     request_rec *r;
 } rpaf_cleanup_rec;
 
@@ -60,13 +208,9 @@ static void *rpaf_create_server_cfg(apr_pool_t *p, server_rec *s) {
     cfg->forbid_if_not_proxy = 0;
     cfg->clean_headers = 0;
 
-    /* server_rec->server_scheme only available after 2.2.3 */
-    #if AP_SERVER_MINORVERSION_NUMBER > 1 && AP_SERVER_PATCHLEVEL_NUMBER > 2
     cfg->orig_scheme = s->server_scheme;
-    #endif
 
     cfg->https_scheme = apr_pstrdup(p, "https");
-    cfg->orig_port = s->port;
 
     return (void *)cfg;
 }
@@ -205,15 +349,33 @@ static int is_in_array(apr_sockaddr_t *remote_addr, apr_array_header_t *proxy_ip
     return 0;
 }
 
+// taken from mod_remoteip (prefix renamed)
+static int rpaf_is_server_port(apr_port_t port) {
+    ap_listen_rec *lr;
+
+    for (lr = ap_listeners; lr; lr = lr->next) {
+        if (lr->bind_addr && lr->bind_addr->port == port) {
+            return 1;
+        }
+    }
+
+    return 0;
+}
+
 static apr_status_t rpaf_cleanup(void *data) {
     rpaf_cleanup_rec *rcr = (rpaf_cleanup_rec *)data;
-    rcr->r->connection->client_ip = apr_pstrdup(rcr->r->connection->pool, rcr->old_ip);
-    rcr->r->connection->client_addr->sa.sin.sin_addr.s_addr = apr_inet_addr(rcr->r->connection->client_ip);
-    rcr->r->useragent_ip = apr_pstrdup(rcr->r->connection->pool, rcr->old_ip);
-    rcr->r->useragent_addr->sa.sin.sin_addr.s_addr = apr_inet_addr(rcr->r->useragent_ip);
+    rcr->r->useragent_ip = apr_pstrdup(rcr->r->connection->pool, rcr->old_useragent_ip);
+    memcpy(rcr->r->useragent_addr, &rcr->old_useragent_addr, sizeof(apr_sockaddr_t));
+    apr_table_unset(rcr->r->connection->notes, "rpaf_https");
     return APR_SUCCESS;
 }
 
+// finds the last element in forward_for which is not in proxy_ips and
+// adds all elements after that as well as the client ip to proxy_list
+// and sets that proxy_list as a "remoteip-proxy-ip-list" note on the
+// request, returns the last IP in forwarded_for that is not in proxy list
+// if it exists, otherwise the first proxy ip if any valid IPs exist in
+// forwarded_for, otherwise NULL
 static char *last_not_in_array(request_rec *r, apr_array_header_t *forwarded_for,
                                apr_array_header_t *proxy_ips) {
     apr_sockaddr_t *sa;
@@ -250,7 +412,9 @@ static char *last_not_in_array(request_rec *r, apr_array_header_t *forwarded_for
     }
 }
 
+// main entry point when mod_rpaf processes a request
 static int rpaf_post_read_request(request_rec *r) {
+    // fwdvalue is the value of the X-Forwarded-For header if present
     char *fwdvalue, *val, *mask, *last_val;
     int i;
     apr_port_t tmpport;
@@ -262,12 +426,19 @@ static int rpaf_post_read_request(request_rec *r) {
     if (!cfg->enable)
         return DECLINED;
 
+    // taken from mod_remoteip, prefix of function renamed
+    /* mod_proxy creates outgoing connections - we don't want those */
+    if (!rpaf_is_server_port(r->connection->local_addr->port)) {
+        return DECLINED;
+    }
+
     /* this overcomes an issue when mod_rewrite causes this to get called again
        and the environment value is lost for HTTPS. This is the only thing that
        is lost and we do not need to process any further after restoring the
-       value. Note that this check uses the *per-request* note - otherwise we
-       would shortcut here for every subsequent request */
-    const char *rpaf_https = apr_table_get(r->notes, "rpaf_https");
+       value. We use a per connection note here even though the value is per
+       request because we delete it in cleanup again and this way we only need
+       one note for our implementation of ssl_is_https and this */
+    const char *rpaf_https = apr_table_get(r->connection->notes, "rpaf_https");
     if (rpaf_https) {
         apr_table_set(r->subprocess_env, "HTTPS", rpaf_https);
         return DECLINED;
@@ -281,8 +452,9 @@ static int rpaf_post_read_request(request_rec *r) {
     }
 
     /* TODO: We should not just assume that we should fallback to
-       X-Forwarded-For as this could pose a security risk, keeping
-       this for now to keep our behaviour consistant */
+       X-Forwarded-For if cfg->headername is unset as this could
+       pose a security risk, keeping this for now to keep our
+       behaviour consistant */
     header_ip = cfg->headername;
     if (header_ip)
       fwdvalue = (char *)apr_table_get(r->headers_in, header_ip);
@@ -312,7 +484,9 @@ static int rpaf_post_read_request(request_rec *r) {
     if (apr_is_empty_array(arr))
         return DECLINED;
 
-    /* get the last IP and check if it is in our list of proxies */
+    /* get the last IP and check if it is in our list of proxies
+       if there is no valid IP in X-Forwarded-For
+       decline to process the request */
     if ((last_val = last_not_in_array(r, arr, cfg->proxy_ips)) == NULL)
         return DECLINED;
 
@@ -329,19 +503,24 @@ static int rpaf_post_read_request(request_rec *r) {
         }
     }
 
+    // store information later used in cleaning up after ourselves
+    // cleanup is important especially for the connection information
+    // as that might be reused in pipelining connections but the X-Forwarded
+    // situation might be totally unrelated in later requests using the same
+    // connection
     rpaf_cleanup_rec *rcr = (rpaf_cleanup_rec *)apr_pcalloc(r->pool, sizeof(rpaf_cleanup_rec));
-    rcr->old_ip = apr_pstrdup(r->connection->pool, r->connection->client_ip);
+    rcr->old_useragent_ip = apr_pstrdup(r->pool, r->useragent_ip);
     rcr->r = r;
     apr_pool_cleanup_register(r->pool, (void *)rcr, rpaf_cleanup, apr_pool_cleanup_null);
-    r->connection->client_ip = apr_pstrdup(r->connection->pool, last_val);
     r->useragent_ip = apr_pstrdup(r->pool, last_val);
+
+    memcpy(&rcr->old_useragent_addr, r->useragent_addr, sizeof(apr_sockaddr_t));
 
     tmppool = r->useragent_addr->pool;
     tmpport = r->useragent_addr->port;
     apr_sockaddr_t *tmpsa;
     int ret = apr_sockaddr_info_get(&tmpsa, r->useragent_ip, APR_UNSPEC, tmpport, 0, tmppool);
     if (ret == APR_SUCCESS) {
-      memcpy(r->connection->client_addr, tmpsa, sizeof(apr_sockaddr_t));
       memcpy(r->useragent_addr, tmpsa, sizeof(apr_sockaddr_t));
     }
     if (cfg->sethostname) {
@@ -365,6 +544,7 @@ static int rpaf_post_read_request(request_rec *r) {
 
             apr_table_set(r->headers_in, "Host", apr_pstrdup(r->pool, ((char **)arr->elts)[((arr->nelts)-1)]));
             r->hostname = apr_pstrdup(r->pool, ((char **)arr->elts)[((arr->nelts)-1)]);
+            r->useragent_host = apr_pstrdup(r->pool, ((char **)arr->elts)[((arr->nelts)-1)]);
             ap_update_vhost_from_headers(r);
         }
     }
@@ -387,11 +567,6 @@ static int rpaf_post_read_request(request_rec *r) {
             }
             if (httpsvalue) {
                 if (strcmp(httpsvalue, cfg->https_scheme) == 0) {
-                    /* set a per-request note to get around an issue with mod_rewrite
-                       (explained in an earlier comment), and a per-connection note
-                       to allow our version of ssl_is_https() to work.
-                     */
-                    apr_table_set(r->notes, "rpaf_https", "on");
                     apr_table_set(r->connection->notes, "rpaf_https", "on");
                     apr_table_set(r->subprocess_env   , "HTTPS"     , "on");
                     scheme = cfg->https_scheme;
@@ -404,7 +579,6 @@ static int rpaf_post_read_request(request_rec *r) {
             }
         } else {
             if(strcmp(httpsvalue, "on") == 0 || strcmp(httpsvalue, "On") == 0) {
-              apr_table_set(r->notes, "rpaf_https", "on");
               apr_table_set(r->connection->notes, "rpaf_https", "on");
               apr_table_set(r->subprocess_env   , "HTTPS"     , "on");
               scheme = cfg->https_scheme;
@@ -413,9 +587,7 @@ static int rpaf_post_read_request(request_rec *r) {
             }
         }
 
-        #if AP_SERVER_MINORVERSION_NUMBER > 1 && AP_SERVER_PATCHLEVEL_NUMBER > 2
-        r->server->server_scheme = scheme;
-        #endif
+        r->parsed_uri.scheme = apr_pstrdup(r->pool, scheme);
     }
 
      if (cfg->setport) {
@@ -429,14 +601,14 @@ static int rpaf_post_read_request(request_rec *r) {
 
         if (!portvalue) {
             header_port            = NULL;
-            r->server->port        = cfg->orig_port;
             r->parsed_uri.port     = 0;
             r->parsed_uri.port_str = NULL;
         } else {
-            r->server->port        = atoi(portvalue);
             r->parsed_uri.port     = atoi(portvalue);
             r->parsed_uri.port_str = apr_pstrcat(r->pool, ":", portvalue, NULL);
         }
+        // update Host header in r->headers_in from r->hostname and r->parsed_uri.port_str
+        ap_update_vhost_from_headers(r);
     }
 
     if (cfg->clean_headers) {
