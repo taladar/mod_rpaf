@@ -14,6 +14,8 @@
    limitations under the License.
 */
 
+// Apache 2.4.19+ and 2.5
+
 // ===== List of C-value to user visible values mapping
 // === in server/vhost.c
 //
@@ -153,6 +155,24 @@
 // X-Forwarded-For is filled based on existing header value and r->useragent_ip
 // X-Forwarded-Host is set to value of existing X-Forwarded-Host header + value of Host header
 // X-Forwarded-Server is set to value of existing header + value of r->server->server_hostname
+
+// ==========
+
+// Apache 2.4.18 and earlier
+//
+// r->useragent_host mentioned above does not exist yet in these yersions
+//
+// === in server/core.c in httpd source
+// ap_get_useragent_host does not exist yet
+//
+// === in server/util_script.c in ap_add_common_vars in httpd source
+// REMOTE_HOST ap_get_remote_host(r, REMOTE_HOST, NULL)
+
+// === in modules/loggers/mod_log_config.c in log_pre_config in httpd source
+// %h in LogFormat ap_get_remote_host(r->connection, r->per_dir_config, REMOTE_NAME, NULL);
+// %{c}h does not exist yet
+
+// ==========
 
 // Notes on things I do not want to have to discover twice
 //
@@ -544,7 +564,10 @@ static int rpaf_post_read_request(request_rec *r) {
 
             apr_table_set(r->headers_in, "Host", apr_pstrdup(r->pool, ((char **)arr->elts)[((arr->nelts)-1)]));
             r->hostname = apr_pstrdup(r->pool, ((char **)arr->elts)[((arr->nelts)-1)]);
+// r->useragent_host was introduced in 2.4.19 (see comment at start of file)
+#if AP_SERVER_MINORVERSION_NUMBER > 3 && AP_SERVER_PATCHLEVEL_NUMBER > 18
             r->useragent_host = apr_pstrdup(r->pool, ((char **)arr->elts)[((arr->nelts)-1)]);
+#endif
             ap_update_vhost_from_headers(r);
         }
     }
