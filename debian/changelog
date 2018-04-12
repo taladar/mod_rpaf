@@ -1,10 +1,16 @@
-libapache2-mod-rpaf (0.8.4-1+wheezy1~saltation.6) UNRELEASED; urgency=medium
+libapache2-mod-rpaf (0.8.4-1+wheezy1~saltation.7) UNRELEASED; urgency=medium
 
   * Non-maintainer upload.
-  * set both useragent_ip and client_ip
-  * set both parseduri values and server values
+  * do not set client_ip or client_addr
+  * do not set server port
+  * do not set server scheme
+  * set parsed_uri scheme
+  * set useragent_host
+  * do not process mod_proxy requests (analogous to mod_remoteip)
+  * add documentation to source code about the C to log, C to variable,...
+    mappings
 
- -- Matthias Hörmann <mhoermann@saltation.de>  Wed, 11 Apr 2018 12:08:02 +0100
+ -- Matthias Hörmann <mhoermann@saltation.de>  Thu, 11 Apr 2018 11:34:02 +0100
 
 libapache2-mod-rpaf (0.8.4-1+wheezy1~saltation.5) UNRELEASED; urgency=medium
 
