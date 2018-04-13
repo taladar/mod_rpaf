@@ -61,6 +61,12 @@
 //
 // === in server/core.c in httpd source
 //
+// in ap_construct_url (used e.g. by mod_dir for redirect URL generation)
+// uses ap_get_server_port to get port
+// uses ap_get_server_name_for_url to get host (adds [] around IPv6 literals but otherwise identical to ap_get_server_name(r) result)
+// uses port == ap_default_port(r) to determine whether or not to add port to URL
+// uses ap_http_scheme(r) to get scheme
+//
 // in ap_get_useragent_host
 // if r->useragent_addr is unset or identical to r->connection->client_addr
 //   return result of ap_get_remote_host
@@ -82,8 +88,8 @@
 // r->client_ip instead of r->useragent_ip
 //
 // in ap_get_server_port
-//   if CanonicalName is off, DNS or unset
-//     if CanonicalPhysicalPort is on
+//   if UseCanonicalName is off, DNS or unset
+//     if UseCanonicalPhysicalPort is on
 //       if r->parsed_uri->port_str is set
 //         return r->parsed_uri->port
 //       else
@@ -103,7 +109,7 @@
 //         else
 //           return ap_default_port(r)
 //   else
-//     if CanonicalPhysicalPort is on
+//     if UseCanonicalPhysicalPort is on
 //       if r->connection->local_addr->port is set
 //         return r->connection->local_addr->port
 //       else
@@ -142,7 +148,7 @@
 // %v in LogFormat r->server->server_hostname
 //
 // %p or %{canonical}p in LogFormat r->server->port or ap_default_port(r) (default port for scheme)
-// %{remote}p          in LogFormat r->user_agent_addr->port
+// %{remote}p          in LogFormat r->useragent_addr->port
 // %{local}p           in LogFormat r->connection->local_addr->port
 //
 // %H in LogFormat r->protocol (this is just something like HTTP/1.1 so we are not concerned with it, just listed so we do not need to discover this twice)
@@ -164,6 +170,11 @@
 // X-Forwarded-For is filled based on existing header value and r->useragent_ip
 // X-Forwarded-Host is set to value of existing X-Forwarded-Host header + value of Host header
 // X-Forwarded-Server is set to value of existing header + value of r->server->server_hostname
+//
+// === in modules/mappers/mod_dir.c in httpd sources
+// redirects if trailing / on directories is missing
+//
+// uses ap_construct_url to produce Location header value
 
 // ==========
 
@@ -193,6 +204,68 @@
 // We need to call ap_update_vhost_from_headers if we update r->hostname or r->parsed_uri.port_str
 // At least in theory, in practice in some situations we do not want to do that since it adds a port to the Host header even if the port is the default port for the scheme
 
+// ==========
+// Notes on the possibility to overwrite r->server->server_scheme
+
+// Cause of consideration: r->server->server_scheme is http even on forwarded https connections (affects REQUEST_SCHEME variable)
+// Cause of consideration: redirects that add the trailing slash on directories are broken on forwarded https connections, they seem to go from https://domain/dir to http://domain:443/dir/ instead of https://domain/dir/
+//
+// === Who writes this value
+// ap_init_virtual_host in server/config.c (just sets to NULL)
+// init_server_config   in server/config.c (just sets to NULL)
+// parsing of config directive ServerName if it contains a scheme (which it does not on any of our servers)
+//
+// === Who reads this value
+// directly http_scheme in modules/http/http_core.c (fallback handler for ap_http_scheme)
+// directly http_port   in modules/http/http_core.c (fallback handler for ap_default_port)
+//
+// ap_default_port is used in modules/proxy/mod_proxy.c in proxy_detect if r->parsed_uri.port_str is unset as port in ap_matches_request_vhost call
+// ap_default_port is used in modules/aaa/mod_auth_digest.c in authenticate_digest_user when comparing no port to default port
+// ap_default_port is used in modules/loggers/mod_log_config.c to log %p and %{canonical}p if r->server->port is 0 (I think that is wildcard)
+// ap_default_port is used in modules/mappers/mod_rewrite.c in reduce_uri if the URL to reduce contains no port in ap_matches_request_vhost call
+// ap_default_port is used in server/core.c in ap_get_server_port if neither r->parsed_uri.port_str nor r->server->port are set (UseCanonicalPhysicalPort on r->connection->local_addr->port has to be unset too)
+//                                                                (also here if UseCanonicalName is set to an invalid value for the C enum somehow)
+//
+// ap_http_scheme is used in modules/arch/netware/mod_nw_ssl.c (irrelevant arch to us)
+// ap_http_scheme is used in modules/cache/cache_storage.c in cache_canonicalise_key if the configured base URI has no scheme
+// ap_http_scheme is used in modules/dav/main/util.c in dav_lookup_uri if parsed_uri.scheme is NULL
+// ap_http_scheme is used in modules/mappers/mod_rewrite.c in reduce_uri to check if r->filename starts with scheme://
+// ap_http_scheme is used in modules/mappers/mod_rewrite.c in fully_qualify_uri (used in Proxy and Redirect rules if the URI is not fully qualified already)
+// ap_http_scheme is used in modules/mappers/mod_rewrite.c in lookup_variable when looking up REQUEST_SCHEME
+// ap_http_scheme is used in modules/mappers/mod_rewrite.c in hook_uri2file when generating the SCRIPT_URI variable for the subprocess environment
+// ap_http_scheme is used in modules/proxy/mod_proxy.c in proxy_detect to compare it to r->parsed_uri.scheme
+// ap_http_scheme is used in modules/ssl/ssl_engine_vars.c in ssl_var_lookup when looking up REQUEST_SCHEME
+// ap_http_scheme is used in modules/http2/h2_request.c in h2_request_rcreate when r->parsed_uri.scheme is not set
+// ap_http_scheme is used in server/util_expr_eval.c in request_var_fn when looking up REQUEST_SCHEME
+// ap_http_scheme is used in server/core.c in ap_construct_url as the scheme for the URL
+// ap_http_scheme is used in server/protocol.c in ap_parse_uri to compare it with r->parsed_uri.scheme to decide whether to set r->hostname from parsed_uri.hostname
+// ap_http_scheme is used in server/util_script.c in ap_add_common_vars to set REQUEST_SCHEME variable in table
+// ap_http_scheme is used in server/util_script.c in ap_add_common_vars to set REDIRECT_URL variable
+//
+// === in server/vhost.c in ap_matches_request_vhost
+// compares all the server address records in r->server->addrs with the given host and port parameters and returns true (1) if it matches
+//
+// === Conclusion
+//
+
+// While it is not very clean to set r->server->server_scheme nobody else seems
+// to write it and it should only lead to problems if the same Apache
+// Virtualhost is accessed concurrently via a mod_rpaf and without mod_rpaf
+//
+// Requests could be affected if a concurrent request that has a different scheme
+// (either no mod_rpaf or via mod_rpaf but with different header values)
+// sets the server_scheme value while the previous request is still in some
+// processing step that might use it.
+//
+// Even then the request should only run into trouble when making decisions
+// based on REQUEST_SCHEME, REDIRECT_URL, used Apache cached proxies (we do
+// not), uses certain mod_rewrite features, mod_dir redirects with missing
+// trailing slash, possibly digest auth
+//
+// There should not be any adverse effect in mixing vhosts with and without
+// mod_rpaf on one host as the server value is vhost specific.
+
+
 #include "ap_release.h"
 #include "ap_listen.h"
 
@@ -217,6 +290,7 @@ typedef struct {
     int                setport;
     const char         *headername;
     apr_array_header_t *proxy_ips;
+    const char         *orig_scheme;
     const char         *https_scheme;
     int                forbid_if_not_proxy;
     int                clean_headers;
@@ -238,6 +312,8 @@ static void *rpaf_create_server_cfg(apr_pool_t *p, server_rec *s) {
     cfg->sethostname = 0;
     cfg->forbid_if_not_proxy = 0;
     cfg->clean_headers = 0;
+
+    cfg->orig_scheme = s->server_scheme;
 
     cfg->https_scheme = apr_pstrdup(p, "https");
 
@@ -582,7 +658,7 @@ static int rpaf_post_read_request(request_rec *r) {
     }
 
     if (cfg->sethttps) {
-        const char *httpsvalue, *scheme;
+        const char *httpsvalue;
         header_https = "X-Forwarded-HTTPS";
         httpsvalue   = apr_table_get(r->headers_in, header_https);
         if (!httpsvalue) {
@@ -601,16 +677,41 @@ static int rpaf_post_read_request(request_rec *r) {
                 if (strcmp(httpsvalue, cfg->https_scheme) == 0) {
                     apr_table_set(r->connection->notes, "rpaf_https", "on");
                     apr_table_set(r->subprocess_env   , "HTTPS"     , "on");
-                    r->parsed_uri.scheme = apr_pstrdup(r->pool, cfg->https_scheme);
+                    r->parsed_uri.scheme     = apr_pstrdup(r->pool, cfg->https_scheme);
+                    // setting global value, might lead to issues if one http and
+                    // one https request are processed concurrently
+                    // for details see comments above
+                    r->server->server_scheme = apr_pstrdup(r->pool, cfg->https_scheme);
+                } else {
+                    r->parsed_uri.scheme     = apr_pstrdup(r->pool, cfg->orig_scheme);
+                    // setting global value, might lead to issues if one http and
+                    // one https request are processed concurrently
+                    // for details see comments above
+                    r->server->server_scheme = apr_pstrdup(r->pool, cfg->orig_scheme);
                 }
             } else {
                 header_https = NULL;
+                r->parsed_uri.scheme     = apr_pstrdup(r->pool, cfg->orig_scheme);
+                // setting global value, might lead to issues if one http and
+                // one https request are processed concurrently
+                // for details see comments above
+                r->server->server_scheme = apr_pstrdup(r->pool, cfg->orig_scheme);
             }
         } else {
             if(strcmp(httpsvalue, "on") == 0 || strcmp(httpsvalue, "On") == 0) {
               apr_table_set(r->connection->notes, "rpaf_https", "on");
               apr_table_set(r->subprocess_env   , "HTTPS"     , "on");
-              r->parsed_uri.scheme = apr_pstrdup(r->pool, cfg->https_scheme);
+              r->parsed_uri.scheme     = apr_pstrdup(r->pool, cfg->https_scheme);
+              // setting global value, might lead to issues if one http and
+              // one https request are processed concurrently
+              // for details see comments above
+              r->server->server_scheme = apr_pstrdup(r->pool, cfg->https_scheme);
+            } else {
+              r->parsed_uri.scheme     = apr_pstrdup(r->pool, cfg->orig_scheme);
+              // setting global value, might lead to issues if one http and
+              // one https request are processed concurrently
+              // for details see comments above
+              r->server->server_scheme = apr_pstrdup(r->pool, cfg->orig_scheme);
             }
         }
 
