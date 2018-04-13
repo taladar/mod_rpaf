@@ -1,3 +1,11 @@
+libapache2-mod-rpaf (0.8.4-1+wheezy1~saltation.12) UNRELEASED; urgency=medium
+
+  * Non-maintainer upload.
+  * restore setting of r->server->server_scheme since not setting it breaks
+    things (see comments in code). This does not solve the race condition
+
+ -- Matthias Hörmann <mhoermann@saltation.de>  Thu, 13 Apr 2018 14:34:02 +0100
+
 libapache2-mod-rpaf (0.8.4-1+wheezy1~saltation.11) UNRELEASED; urgency=medium
 
   * Non-maintainer upload.
