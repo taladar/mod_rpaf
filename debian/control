@@ -1,7 +1,7 @@
 Source: libapache2-mod-rpaf
 Maintainer: Sergey B Kirpichev <skirpichev@gmail.com>
 Section: httpd
-Priority: extra
+Priority: optional
 Standards-Version: 3.9.6
 Build-Depends: apache2-dev, debhelper (>= 9), dh-apache2
 Vcs-Git: git://git.debian.org/git/collab-maint/libapache2-mod-rpaf.git
