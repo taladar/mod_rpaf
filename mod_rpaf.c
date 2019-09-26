@@ -810,7 +810,13 @@ static int ssl_is_https(conn_rec *c) {
 }
 
 static void rpaf_register_hooks(apr_pool_t *p) {
-    ap_hook_post_read_request(rpaf_post_read_request, NULL, NULL, APR_HOOK_FIRST);
+    // since mod_security2 uses APR_HOOK_REALLY_FIRST we have no other choice but to do the same and use this list to avoid running after mod_security2
+    static const char *const postread_afterme_list[] = {
+        "mod_security2.c",
+        NULL
+    };
+
+    ap_hook_post_read_request(rpaf_post_read_request, NULL, postread_afterme_list, APR_HOOK_REALLY_FIRST);
 
     /* this will only work if mod_ssl is not loaded */
     if (APR_RETRIEVE_OPTIONAL_FN(ssl_is_https) == NULL)
