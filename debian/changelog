@@ -4,7 +4,7 @@ libapache2-mod-rpaf (0.8.4-1+wheezy1~saltation.13) UNRELEASED; urgency=medium
   * change hook from APR_HOOK_FIRST to APR_HOOK_REALLY_FIRST to run before
     mod_security2
 
- -- Matthias Hörmann <mhoermann@saltation.de>  Thu, 26 Sep 2018 14:41:02 +0200
+ -- Matthias Hörmann <mhoermann@saltation.de>  Thu, 26 Sep 2019 14:41:02 +0200
 
 libapache2-mod-rpaf (0.8.4-1+wheezy1~saltation.12) UNRELEASED; urgency=medium
 
