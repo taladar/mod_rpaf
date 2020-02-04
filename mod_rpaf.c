@@ -681,13 +681,13 @@ static int rpaf_post_read_request(request_rec *r) {
                     // setting global value, might lead to issues if one http and
                     // one https request are processed concurrently
                     // for details see comments above
-                    r->server->server_scheme = apr_pstrdup(r->pool, cfg->https_scheme);
+                    r->server->server_scheme = (const char*) cfg->https_scheme;
                 } else {
                     r->parsed_uri.scheme     = apr_pstrdup(r->pool, cfg->orig_scheme);
                     // setting global value, might lead to issues if one http and
                     // one https request are processed concurrently
                     // for details see comments above
-                    r->server->server_scheme = apr_pstrdup(r->pool, cfg->orig_scheme);
+                    r->server->server_scheme = (const char*) cfg->orig_scheme;
                 }
             } else {
                 header_https = NULL;
@@ -695,7 +695,7 @@ static int rpaf_post_read_request(request_rec *r) {
                 // setting global value, might lead to issues if one http and
                 // one https request are processed concurrently
                 // for details see comments above
-                r->server->server_scheme = apr_pstrdup(r->pool, cfg->orig_scheme);
+                r->server->server_scheme = (const char*) cfg->orig_scheme;
             }
         } else {
             if(strcmp(httpsvalue, "on") == 0 || strcmp(httpsvalue, "On") == 0) {
@@ -705,13 +705,13 @@ static int rpaf_post_read_request(request_rec *r) {
               // setting global value, might lead to issues if one http and
               // one https request are processed concurrently
               // for details see comments above
-              r->server->server_scheme = apr_pstrdup(r->pool, cfg->https_scheme);
+              r->server->server_scheme = (const char*) cfg->https_scheme;
             } else {
               r->parsed_uri.scheme     = apr_pstrdup(r->pool, cfg->orig_scheme);
               // setting global value, might lead to issues if one http and
               // one https request are processed concurrently
               // for details see comments above
-              r->server->server_scheme = apr_pstrdup(r->pool, cfg->orig_scheme);
+              r->server->server_scheme = (const char*) cfg->orig_scheme;
             }
         }
 
