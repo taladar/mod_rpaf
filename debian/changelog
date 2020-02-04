@@ -4,7 +4,7 @@ libapache2-mod-rpaf (0.8.4-1+wheezy1~saltation.14) UNRELEASED; urgency=medium
   * fix allocation of strings assigned to r->server->server_scheme, should not
     be allocated from request pool
 
- -- Matthias Hörmann <mhoermann@saltation.de>  Tue, 04 Feb 2022 10:51:02 +0200
+ -- Matthias Hörmann <mhoermann@saltation.de>  Tue, 04 Feb 2020 10:51:02 +0200
 
 libapache2-mod-rpaf (0.8.4-1+wheezy1~saltation.13) UNRELEASED; urgency=medium
 
