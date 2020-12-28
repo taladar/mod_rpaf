@@ -294,6 +294,8 @@ typedef struct {
     const char         *https_scheme;
     int                forbid_if_not_proxy;
     int                clean_headers;
+    int                enable_request_id;
+    const char         *request_id_headername;
 } rpaf_server_cfg;
 
 typedef struct {
@@ -316,6 +318,8 @@ static void *rpaf_create_server_cfg(apr_pool_t *p, server_rec *s) {
     cfg->orig_scheme = s->server_scheme;
 
     cfg->https_scheme = apr_pstrdup(p, "https");
+
+    cfg->enable_request_id = 0;
 
     return (void *)cfg;
 }
@@ -472,7 +476,26 @@ static apr_status_t rpaf_cleanup(void *data) {
     rcr->r->useragent_ip = apr_pstrdup(rcr->r->connection->pool, rcr->old_useragent_ip);
     memcpy(rcr->r->useragent_addr, &rcr->old_useragent_addr, sizeof(apr_sockaddr_t));
     apr_table_unset(rcr->r->connection->notes, "rpaf_https");
+    apr_table_unset(rcr->r->subprocess_env, "X_REQUEST_ID");
     return APR_SUCCESS;
+}
+
+static const char *rpaf_enable_request_id(cmd_parms *cmd, void *dummy, int flag) {
+    server_rec *s = cmd->server;
+    rpaf_server_cfg *cfg = (rpaf_server_cfg *)ap_get_module_config(s->module_config,
+                                                                   &rpaf_module);
+
+    cfg->enable_request_id = flag;
+    return NULL;
+}
+
+static const char *rpaf_set_request_id_headername(cmd_parms *cmd, void *dummy, const char *headername) {
+    server_rec *s = cmd->server;
+    rpaf_server_cfg *cfg = (rpaf_server_cfg *)ap_get_module_config(s->module_config,
+                                                                   &rpaf_module);
+
+    cfg->request_id_headername = headername;
+    return NULL;
 }
 
 // finds the last element in forward_for which is not in proxy_ips and
@@ -520,11 +543,11 @@ static char *last_not_in_array(request_rec *r, apr_array_header_t *forwarded_for
 // main entry point when mod_rpaf processes a request
 static int rpaf_post_read_request(request_rec *r) {
     // fwdvalue is the value of the X-Forwarded-For header if present
-    char *fwdvalue, *val, *mask, *last_val;
+    char *fwdvalue, *val, *mask, *last_val, *request_id;
     int i;
     apr_port_t tmpport;
     apr_pool_t *tmppool;
-    const char *header_ip = NULL, *header_host = NULL, *header_https = NULL, *header_port = NULL;
+    const char *header_ip = NULL, *header_host = NULL, *header_https = NULL, *header_port = NULL, *header_request_id = NULL;
     rpaf_server_cfg *cfg = (rpaf_server_cfg *)ap_get_module_config(r->server->module_config,
                                                                    &rpaf_module);
 
@@ -549,8 +572,24 @@ static int rpaf_post_read_request(request_rec *r) {
         return DECLINED;
     }
 
+    if (cfg->enable_request_id) {
+        header_request_id = cfg->request_id_headername;
+        if(!header_request_id) {
+            header_request_id = "X-Request-Id";
+        }
+    }
+
     /* check if the remote_addr is in the allowed proxy IP list */
     if (is_in_array(r->connection->client_addr, cfg->proxy_ips) != 1) {
+        if (cfg->enable_request_id) {
+            // if it is not we need to remove any potentially set request Id headers so we do not pass on insecurely obtained data
+            apr_table_unset(r->headers_in, header_request_id);
+            // we need to generate a request id and use that since we either did not get one from upstream or can not trust upstream
+            apr_time_t now = apr_time_now();
+            request_id = apr_psprintf(r->pool, "apache-%ld-%ld", r->connection->id, now);
+            apr_table_set(r->subprocess_env, "X_REQUEST_ID", request_id);
+            apr_table_set(r->headers_in, "X-Request-Id", apr_pstrdup(r->pool, request_id));
+        }
         if (cfg->forbid_if_not_proxy)
             return HTTP_FORBIDDEN;
         return DECLINED;
@@ -742,6 +781,21 @@ static int rpaf_post_read_request(request_rec *r) {
         if (header_port ) apr_table_unset(r->headers_in, header_port );
     }
 
+    if (cfg->enable_request_id) {
+        // we can trust the header here (as far as we can trust out trusted
+        // reverse proxies) because there is a return above in the case that
+        // the request does not come from a trusted reverse proxy
+        request_id = (char*)apr_table_get(r->headers_in, header_port);
+
+        if(!request_id) {
+          // if we could not extract a request id from the header we need to generate one
+          apr_time_t now = apr_time_now();
+          request_id = apr_psprintf(r->pool, "apache-%ld-%ld", r->connection->id, now);
+        }
+        apr_table_set(r->subprocess_env, "X_REQUEST_ID", request_id);
+        apr_table_set(r->headers_in, "X-Request-Id", apr_pstrdup(r->pool, request_id));
+    }
+
     return DECLINED;
 }
 
@@ -801,6 +855,20 @@ static const command_rec rpaf_cmds[] = {
                  NULL,
                  RSRC_CONF,
                  "Which header to look for when trying to find the real ip of the client in a proxy setup"
+                 ),
+    AP_INIT_FLAG(
+                 "RPAF_EnableRequestId",
+                 rpaf_enable_request_id,
+                 NULL,
+                 RSRC_CONF,
+                 "Enable mechanism to extract request id from X-Request-Id header if the request is from trusted RPAF_ProxyIPs (only works if RPAF_Enable is enabled)"
+                 ),
+    AP_INIT_TAKE1(
+                 "RPAF_RequestIdHeader",
+                 rpaf_set_request_id_headername,
+                 NULL,
+                 RSRC_CONF,
+                 "Which header to look for when trying to find the request id in a proxy setup"
                  ),
     { NULL }
 };
