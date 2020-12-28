@@ -785,7 +785,7 @@ static int rpaf_post_read_request(request_rec *r) {
         // we can trust the header here (as far as we can trust out trusted
         // reverse proxies) because there is a return above in the case that
         // the request does not come from a trusted reverse proxy
-        request_id = (char*)apr_table_get(r->headers_in, header_port);
+        request_id = (char*)apr_table_get(r->headers_in, header_request_id);
 
         if(!request_id) {
           // if we could not extract a request id from the header we need to generate one
