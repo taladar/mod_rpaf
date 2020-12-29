@@ -1,3 +1,12 @@
+libapache2-mod-rpaf (0.8.4-1+wheezy1~saltation.17) UNRELEASED; urgency=medium
+
+  * Non-maintainer upload.
+  * move X-Request-Id logic before various early returns (but still after
+    trusted proxy check), this should fix missing request id if a trusted
+    proxy sends no X-Forwarded-For header or one with no IPs other than its own
+
+ -- Matthias Hörmann <mhoermann@saltation.de>  Tue, 29 Dec 2020 10:38:02 +0200
+
 libapache2-mod-rpaf (0.8.4-1+wheezy1~saltation.16) UNRELEASED; urgency=medium
 
   * Non-maintainer upload.

@@ -595,6 +595,21 @@ static int rpaf_post_read_request(request_rec *r) {
         return DECLINED;
     }
 
+    if (cfg->enable_request_id) {
+        // we can trust the header here (as far as we can trust out trusted
+        // reverse proxies) because there is a return above in the case that
+        // the request does not come from a trusted reverse proxy
+        request_id = (char*)apr_table_get(r->headers_in, header_request_id);
+
+        if(!request_id) {
+          // if we could not extract a request id from the header we need to generate one
+          apr_time_t now = apr_time_now();
+          request_id = apr_psprintf(r->pool, "apache-%ld-%ld", r->connection->id, now);
+        }
+        apr_table_set(r->subprocess_env, "X_REQUEST_ID", request_id);
+        apr_table_set(r->headers_in, "X-Request-Id", apr_pstrdup(r->pool, request_id));
+    }
+
     /* TODO: We should not just assume that we should fallback to
        X-Forwarded-For if cfg->headername is unset as this could
        pose a security risk, keeping this for now to keep our
@@ -779,21 +794,6 @@ static int rpaf_post_read_request(request_rec *r) {
         if (header_host ) apr_table_unset(r->headers_in, header_host );
         if (header_https) apr_table_unset(r->headers_in, header_https);
         if (header_port ) apr_table_unset(r->headers_in, header_port );
-    }
-
-    if (cfg->enable_request_id) {
-        // we can trust the header here (as far as we can trust out trusted
-        // reverse proxies) because there is a return above in the case that
-        // the request does not come from a trusted reverse proxy
-        request_id = (char*)apr_table_get(r->headers_in, header_request_id);
-
-        if(!request_id) {
-          // if we could not extract a request id from the header we need to generate one
-          apr_time_t now = apr_time_now();
-          request_id = apr_psprintf(r->pool, "apache-%ld-%ld", r->connection->id, now);
-        }
-        apr_table_set(r->subprocess_env, "X_REQUEST_ID", request_id);
-        apr_table_set(r->headers_in, "X-Request-Id", apr_pstrdup(r->pool, request_id));
     }
 
     return DECLINED;
