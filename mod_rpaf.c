@@ -594,7 +594,7 @@ static int rpaf_post_read_request(request_rec *r) {
             apr_time_t now = apr_time_now();
             request_id = apr_psprintf(r->pool, "apache-%ld-%ld", r->connection->id, now);
             apr_table_set(r->subprocess_env, "X_REQUEST_ID", request_id);
-            apr_table_set(r->headers_in, "X-Request-Id", apr_pstrdup(r->pool, request_id));
+            apr_table_set(r->headers_in, header_request_id, apr_pstrdup(r->pool, request_id));
             apr_table_set(r->notes, "rpaf_request_id", apr_pstrdup(r->pool, request_id));
         }
         if (cfg->forbid_if_not_proxy)
@@ -614,7 +614,7 @@ static int rpaf_post_read_request(request_rec *r) {
           request_id = apr_psprintf(r->pool, "apache-%ld-%ld", r->connection->id, now);
         }
         apr_table_set(r->subprocess_env, "X_REQUEST_ID", request_id);
-        apr_table_set(r->headers_in, "X-Request-Id", apr_pstrdup(r->pool, request_id));
+        apr_table_set(r->headers_in, header_request_id, apr_pstrdup(r->pool, request_id));
         apr_table_set(r->notes, "rpaf_request_id", apr_pstrdup(r->pool, request_id));
     }
 
@@ -869,7 +869,7 @@ static const command_rec rpaf_cmds[] = {
                  rpaf_enable_request_id,
                  NULL,
                  RSRC_CONF,
-                 "Enable mechanism to extract request id from X-Request-Id header if the request is from trusted RPAF_ProxyIPs (only works if RPAF_Enable is enabled)"
+                 "Enable mechanism to extract request id from X-Request-Id header (or RPAF_RequestIdHeader if set) if the request is from trusted RPAF_ProxyIPs (only works if RPAF_Enable is enabled)"
                  ),
     AP_INIT_TAKE1(
                  "RPAF_RequestIdHeader",
