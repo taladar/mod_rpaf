@@ -476,6 +476,7 @@ static apr_status_t rpaf_cleanup(void *data) {
     rcr->r->useragent_ip = apr_pstrdup(rcr->r->connection->pool, rcr->old_useragent_ip);
     memcpy(rcr->r->useragent_addr, &rcr->old_useragent_addr, sizeof(apr_sockaddr_t));
     apr_table_unset(rcr->r->connection->notes, "rpaf_https");
+    apr_table_unset(rcr->r->connection->notes, "rpaf_request_id");
     apr_table_unset(rcr->r->subprocess_env, "X_REQUEST_ID");
     return APR_SUCCESS;
 }
@@ -560,9 +561,9 @@ static int rpaf_post_read_request(request_rec *r) {
         return DECLINED;
     }
 
-    const char *rpaf_request_id = apr_table_get(r->notes, "rpaf_request_id");
+    const char *rpaf_request_id = apr_table_get(r->connection->notes, "rpaf_request_id");
     if(rpaf_request_id) {
-        // same as below just for request id
+        // same as below just for request id, we use a connection note to avoid its loss in sub-requests
         apr_table_set(r->subprocess_env, "X_REQUEST_ID", rpaf_request_id);
     }
 
@@ -595,7 +596,7 @@ static int rpaf_post_read_request(request_rec *r) {
             request_id = apr_psprintf(r->pool, "apache-%ld-%ld", r->connection->id, now);
             apr_table_set(r->subprocess_env, "X_REQUEST_ID", request_id);
             apr_table_set(r->headers_in, header_request_id, apr_pstrdup(r->pool, request_id));
-            apr_table_set(r->notes, "rpaf_request_id", apr_pstrdup(r->pool, request_id));
+            apr_table_set(r->connection->notes, "rpaf_request_id", apr_pstrdup(r->pool, request_id));
         }
         if (cfg->forbid_if_not_proxy)
             return HTTP_FORBIDDEN;
@@ -615,7 +616,7 @@ static int rpaf_post_read_request(request_rec *r) {
         }
         apr_table_set(r->subprocess_env, "X_REQUEST_ID", request_id);
         apr_table_set(r->headers_in, header_request_id, apr_pstrdup(r->pool, request_id));
-        apr_table_set(r->notes, "rpaf_request_id", apr_pstrdup(r->pool, request_id));
+        apr_table_set(r->connection->notes, "rpaf_request_id", apr_pstrdup(r->pool, request_id));
     }
 
     /* TODO: We should not just assume that we should fallback to
