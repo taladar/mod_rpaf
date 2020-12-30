@@ -1,3 +1,11 @@
+libapache2-mod-rpaf (0.8.4-1+wheezy1~saltation.19) UNRELEASED; urgency=medium
+
+  * Non-maintainer upload.
+  * use connection note instead of request note to avoid loss of X_REQUEST_ID
+    in case mod_rewrite uses sub-requests
+
+ -- Matthias Hörmann <mhoermann@saltation.de>  Wed, 30 Dec 2020 11:16:02 +0200
+
 libapache2-mod-rpaf (0.8.4-1+wheezy1~saltation.18) UNRELEASED; urgency=medium
 
   * Non-maintainer upload.
