@@ -560,6 +560,12 @@ static int rpaf_post_read_request(request_rec *r) {
         return DECLINED;
     }
 
+    const char *rpaf_request_id = apr_table_get(r->notes, "rpaf_request_id");
+    if(rpaf_request_id) {
+        // same as below just for request id
+        apr_table_set(r->subprocess_env, "X_REQUEST_ID", rpaf_request_id);
+    }
+
     /* this overcomes an issue when mod_rewrite causes this to get called again
        and the environment value is lost for HTTPS. This is the only thing that
        is lost and we do not need to process any further after restoring the
@@ -589,6 +595,7 @@ static int rpaf_post_read_request(request_rec *r) {
             request_id = apr_psprintf(r->pool, "apache-%ld-%ld", r->connection->id, now);
             apr_table_set(r->subprocess_env, "X_REQUEST_ID", request_id);
             apr_table_set(r->headers_in, "X-Request-Id", apr_pstrdup(r->pool, request_id));
+            apr_table_set(r->notes, "rpaf_request_id", apr_pstrdup(r->pool, request_id));
         }
         if (cfg->forbid_if_not_proxy)
             return HTTP_FORBIDDEN;
@@ -608,6 +615,7 @@ static int rpaf_post_read_request(request_rec *r) {
         }
         apr_table_set(r->subprocess_env, "X_REQUEST_ID", request_id);
         apr_table_set(r->headers_in, "X-Request-Id", apr_pstrdup(r->pool, request_id));
+        apr_table_set(r->notes, "rpaf_request_id", apr_pstrdup(r->pool, request_id));
     }
 
     /* TODO: We should not just assume that we should fallback to
