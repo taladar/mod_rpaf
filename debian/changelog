@@ -1,3 +1,12 @@
+libapache2-mod-rpaf (0.8.4-1+wheezy1~saltation.18) UNRELEASED; urgency=medium
+
+  * Non-maintainer upload.
+  * restore X_REQUEST_ID if it is lost due to mod_rewrite
+  * use RPAF_RequestIdHeader on outgoing header instead of the hardcoded
+    X-Request-Id
+
+ -- Matthias Hörmann <mhoermann@saltation.de>  Wed, 30 Dec 2020 11:00:02 +0200
+
 libapache2-mod-rpaf (0.8.4-1+wheezy1~saltation.17) UNRELEASED; urgency=medium
 
   * Non-maintainer upload.
