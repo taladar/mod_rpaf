@@ -1,3 +1,10 @@
+libapache2-mod-rpaf (0.8.4-1+wheezy1~saltation.20) UNRELEASED; urgency=medium
+
+  * Non-maintainer upload.
+  * remove old lintian override that makes lintian throw an error on bullseye
+
+ -- Matthias Hörmann <mhoermann@saltation.de>  Tue, 17 Aug 2021 15:13:02 +0200
+
 libapache2-mod-rpaf (0.8.4-1+wheezy1~saltation.19) UNRELEASED; urgency=medium
 
   * Non-maintainer upload.
