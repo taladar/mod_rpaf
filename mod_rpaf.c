@@ -278,6 +278,8 @@
 #include "apr_strings.h"
 
 #include <ctype.h> // isspace
+#include <string.h> // strchr, strlen
+#include <strings.h> // strcasecmp
 #include <arpa/inet.h>
 
 module AP_MODULE_DECLARE_DATA rpaf_module;
@@ -296,6 +298,8 @@ typedef struct {
     int                clean_headers;
     int                enable_request_id;
     const char         *request_id_headername;
+    int                enable_forwarded;
+    apr_array_header_t *sanitize_headers;
 } rpaf_server_cfg;
 
 typedef struct {
@@ -320,6 +324,9 @@ static void *rpaf_create_server_cfg(apr_pool_t *p, server_rec *s) {
     cfg->https_scheme = apr_pstrdup(p, "https");
 
     cfg->enable_request_id = 0;
+
+    cfg->enable_forwarded = 0;
+    cfg->sanitize_headers = apr_array_make(p, 8, sizeof(const char *));
 
     return (void *)cfg;
 }
@@ -477,7 +484,20 @@ static apr_status_t rpaf_cleanup(void *data) {
     memcpy(rcr->r->useragent_addr, &rcr->old_useragent_addr, sizeof(apr_sockaddr_t));
     apr_table_unset(rcr->r->connection->notes, "rpaf_https");
     apr_table_unset(rcr->r->connection->notes, "rpaf_request_id");
+    apr_table_unset(rcr->r->connection->notes, "rpaf_forwarded");
     apr_table_unset(rcr->r->subprocess_env, "X_REQUEST_ID");
+    return APR_SUCCESS;
+}
+
+// the rpaf_forwarded connection note has to disappear together with the request
+// that produced it, otherwise the next request on a keep-alive connection would
+// inherit a Forwarded header describing a completely unrelated chain. The
+// cleanup above only runs on the code path that also rewrites the client IP, so
+// the Forwarded handling registers this one on every path where it stores a
+// value.
+static apr_status_t rpaf_forwarded_cleanup(void *data) {
+    conn_rec *c = (conn_rec *)data;
+    apr_table_unset(c->notes, "rpaf_forwarded");
     return APR_SUCCESS;
 }
 
@@ -496,6 +516,24 @@ static const char *rpaf_set_request_id_headername(cmd_parms *cmd, void *dummy, c
                                                                    &rpaf_module);
 
     cfg->request_id_headername = headername;
+    return NULL;
+}
+
+static const char *rpaf_enable_forwarded(cmd_parms *cmd, void *dummy, int flag) {
+    server_rec *s = cmd->server;
+    rpaf_server_cfg *cfg = (rpaf_server_cfg *)ap_get_module_config(s->module_config,
+                                                                   &rpaf_module);
+
+    cfg->enable_forwarded = flag;
+    return NULL;
+}
+
+static const char *rpaf_add_sanitize_header(cmd_parms *cmd, void *dummy, const char *headername) {
+    server_rec *s = cmd->server;
+    rpaf_server_cfg *cfg = (rpaf_server_cfg *)ap_get_module_config(s->module_config,
+                                                                   &rpaf_module);
+
+    *(const char **)apr_array_push(cfg->sanitize_headers) = apr_pstrdup(cmd->pool, headername);
     return NULL;
 }
 
@@ -541,6 +579,124 @@ static char *last_not_in_array(request_rec *r, apr_array_header_t *forwarded_for
     }
 }
 
+// ===== RFC 7239 Forwarded header support
+//
+// https://www.rfc-editor.org/rfc/rfc7239.html
+//
+// We keep setting the X-Forwarded-* headers exactly as before, this only adds
+// the standard header next to them, so an application or framework behind us
+// that evaluates the standard header sees something it can actually trust.
+//
+// The rules are the same ones we already apply to X-Request-Id:
+//   * peer is not in RPAF_ProxyIPs -> throw away whatever the client sent and
+//     describe the client ourselves
+//   * peer is in RPAF_ProxyIPs     -> keep what the proxy sent and append our
+//     own element for the hop it made to us (RFC 7239 section 4)
+
+// A node identifier is a plain token for an IPv4 address but an IPv6 address
+// contains colons, so RFC 7239 section 6 requires it to be bracketed, and the
+// brackets in turn require a quoted-string.
+static const char *rpaf_forwarded_node(apr_pool_t *p, const char *ip) {
+    if (!ip || !*ip)
+        return "unknown";
+
+    if (strchr(ip, ':'))
+        return apr_psprintf(p, "\"[%s]\"", ip);
+
+    return apr_pstrdup(p, ip);
+}
+
+// quoted-string per RFC 7230 section 3.2.6, used for the host parameter since a
+// Host header may carry a port and therefore a colon. Control characters are
+// dropped rather than escaped so that a hostile Host header can never produce a
+// header value that breaks the parser of whatever reads it downstream.
+static const char *rpaf_forwarded_quoted_string(apr_pool_t *p, const char *value) {
+    apr_size_t len = strlen(value);
+    apr_size_t i;
+    apr_size_t j = 0;
+    char *out = apr_palloc(p, 2 * len + 3);
+
+    out[j++] = '"';
+    for (i = 0; i < len; i++) {
+        unsigned char c = (unsigned char)value[i];
+
+        if (c < 0x20 || c == 0x7f)
+            continue;
+        if (c == '"' || c == '\\')
+            out[j++] = '\\';
+        out[j++] = (char)c;
+    }
+    out[j++] = '"';
+    out[j]   = '\0';
+
+    return out;
+}
+
+// resolved once in post_config, because at register_hooks time we cannot know
+// yet whether mod_ssl has already registered its implementation
+static APR_OPTIONAL_FN_TYPE(ssl_is_https) *rpaf_forwarded_ssl_is_https = NULL;
+
+// Which scheme did the client use? The rpaf_https connection note is what the
+// RPAF_SetHTTPS handling derived from the upstream headers; ssl_is_https covers
+// a request that reached this server over TLS directly.
+//
+// Deliberately NOT ap_http_scheme(r): without mod_ssl that falls back to
+// r->server->server_scheme, which this module overwrites per request on a
+// structure shared by the whole server (see the comments at the top of this
+// file), so it can report https for a plain request that merely followed an
+// https one in the same child process. That is tolerable for the existing uses
+// of that value but not for a header we want applications to trust.
+static int rpaf_forwarded_is_https(request_rec *r) {
+    const char *https;
+
+    if (apr_table_get(r->connection->notes, "rpaf_https"))
+        return 1;
+
+    https = apr_table_get(r->subprocess_env, "HTTPS");
+    if (https && strcasecmp(https, "on") == 0)
+        return 1;
+
+    if (rpaf_forwarded_ssl_is_https && rpaf_forwarded_ssl_is_https(r->connection))
+        return 1;
+
+    return 0;
+}
+
+// One Forwarded element describing the hop that reached us. for_ip is the node
+// we received the request from, which is the real client when we are the first
+// hop and the trusted reverse proxy when we are not.
+static const char *rpaf_forwarded_element(request_rec *r, const char *for_ip) {
+    const char *host = apr_table_get(r->headers_in, "Host");
+    const char *element;
+
+    element = apr_psprintf(r->pool, "for=%s;proto=%s",
+                           rpaf_forwarded_node(r->pool, for_ip),
+                           rpaf_forwarded_is_https(r) ? "https" : "http");
+
+    if (host)
+        element = apr_pstrcat(r->pool, element, ";host=",
+                              rpaf_forwarded_quoted_string(r->pool, host), NULL);
+
+    // the interface the request came in on, so a multi-listener setup can still
+    // tell which access point was used
+    element = apr_pstrcat(r->pool, element, ";by=",
+                          rpaf_forwarded_node(r->pool, r->connection->local_ip), NULL);
+
+    return element;
+}
+
+// Stores the header for the backend and remembers it on the connection so that
+// a second run of this hook for the same request (mod_rewrite creates
+// sub-requests, which is why rpaf_https and rpaf_request_id exist) restores the
+// value instead of appending a second element.
+static void rpaf_forwarded_store(request_rec *r, const char *value) {
+    apr_table_set(r->headers_in, "Forwarded", value);
+    apr_table_set(r->connection->notes, "rpaf_forwarded",
+                  apr_pstrdup(r->connection->pool, value));
+    apr_pool_cleanup_register(r->pool, (void *)r->connection, rpaf_forwarded_cleanup,
+                              apr_pool_cleanup_null);
+}
+
 // main entry point when mod_rpaf processes a request
 static int rpaf_post_read_request(request_rec *r) {
     // fwdvalue is the value of the X-Forwarded-For header if present
@@ -549,6 +705,13 @@ static int rpaf_post_read_request(request_rec *r) {
     apr_port_t tmpport;
     apr_pool_t *tmppool;
     const char *header_ip = NULL, *header_host = NULL, *header_https = NULL, *header_port = NULL, *header_request_id = NULL;
+    // declared here rather than at first use so the single exit for the
+    // Forwarded handling below does not jump over its initialisation
+    apr_array_header_t *arr;
+    // set once we know this run must not touch the Forwarded header any more,
+    // either because a previous run of this hook for the same request already
+    // produced it or because we already stored it on the untrusted path
+    int forwarded_done = 0;
     rpaf_server_cfg *cfg = (rpaf_server_cfg *)ap_get_module_config(r->server->module_config,
                                                                    &rpaf_module);
 
@@ -565,6 +728,15 @@ static int rpaf_post_read_request(request_rec *r) {
     if(rpaf_request_id) {
         // same as below just for request id, we use a connection note to avoid its loss in sub-requests
         apr_table_set(r->subprocess_env, "X_REQUEST_ID", rpaf_request_id);
+    }
+
+    const char *rpaf_forwarded = apr_table_get(r->connection->notes, "rpaf_forwarded");
+    if (rpaf_forwarded) {
+        // same as above, a repeat run of this hook for the same request restores
+        // what we produced the first time. Appending again would add a second
+        // element describing the same hop.
+        apr_table_set(r->headers_in, "Forwarded", rpaf_forwarded);
+        forwarded_done = 1;
     }
 
     /* this overcomes an issue when mod_rewrite causes this to get called again
@@ -598,6 +770,22 @@ static int rpaf_post_read_request(request_rec *r) {
             apr_table_set(r->headers_in, header_request_id, apr_pstrdup(r->pool, request_id));
             apr_table_set(r->connection->notes, "rpaf_request_id", apr_pstrdup(r->pool, request_id));
         }
+
+        // headers a reverse proxy in front of us is allowed to set but a client
+        // must never be able to inject. The list is configured rather than
+        // hardcoded because which of them are meaningful depends on what runs
+        // in front of and behind this server.
+        for (i = 0; i < cfg->sanitize_headers->nelts; i++) {
+            apr_table_unset(r->headers_in, ((const char **)cfg->sanitize_headers->elts)[i]);
+        }
+
+        if (cfg->enable_forwarded && !forwarded_done) {
+            // we cannot trust anything the client claims about the chain, so we
+            // drop it and describe the client ourselves
+            apr_table_unset(r->headers_in, "Forwarded");
+            rpaf_forwarded_store(r, rpaf_forwarded_element(r, r->connection->client_ip));
+        }
+
         if (cfg->forbid_if_not_proxy)
             return HTTP_FORBIDDEN;
         return DECLINED;
@@ -632,12 +820,14 @@ static int rpaf_post_read_request(request_rec *r) {
       fwdvalue  = (char *)apr_table_get(r->headers_in, header_ip);
     }
 
-    /* if there was no forwarded for header then we dont do anything */
+    /* if there was no forwarded for header then we dont do anything
+       (other than the Forwarded handling at the end, which applies to every
+       request from a trusted reverse proxy, with or without X-Forwarded-For) */
     if (!fwdvalue)
-        return DECLINED;
+        goto set_forwarded;
 
     /* split up the list of forwarded IPs */
-    apr_array_header_t *arr = apr_array_make(r->pool, 4, sizeof(char *));
+    arr = apr_array_make(r->pool, 4, sizeof(char *));
     while ((val = strsep(&fwdvalue, ",")) != NULL) {
         /* strip leading and trailing whitespace */
         while(isspace(*val))
@@ -650,13 +840,13 @@ static int rpaf_post_read_request(request_rec *r) {
 
     /* if there were no IPs, then there is nothing to do */
     if (apr_is_empty_array(arr))
-        return DECLINED;
+        goto set_forwarded;
 
     /* get the last IP and check if it is in our list of proxies
        if there is no valid IP in X-Forwarded-For
        decline to process the request */
     if ((last_val = last_not_in_array(r, arr, cfg->proxy_ips)) == NULL)
-        return DECLINED;
+        goto set_forwarded;
 
     /* if we are cleaning up the headers then we need to correct the forwarded IP list */
     if (cfg->clean_headers)
@@ -805,6 +995,33 @@ static int rpaf_post_read_request(request_rec *r) {
         if (header_port ) apr_table_unset(r->headers_in, header_port );
     }
 
+set_forwarded:
+    // Single exit for the trusted branch, reached from every return point above
+    // as well, so a request from a trusted reverse proxy always gets its hop
+    // appended, even when it carried no X-Forwarded-For at all.
+    //
+    // We append rather than replace because the value came from a proxy we
+    // trust, and we use the address of that proxy rather than the resolved
+    // client for our own element: the client is already described by the
+    // element the proxy itself added (RFC 7239 section 5.2).
+    //
+    // For the same reason proto and host in our element describe THIS hop, not
+    // the client. A trusted proxy that reaches us over TLS while telling us via
+    // X-Forwarded-Proto that the client used plain http therefore produces
+    // proto=https here, which is correct for the hop it describes. Consumers
+    // have to read the first element of the chain to learn about the client,
+    // which is what the frameworks that implement RFC 7239 do.
+    if (cfg->enable_forwarded && !forwarded_done) {
+        const char *existing = apr_table_get(r->headers_in, "Forwarded");
+        const char *element  = rpaf_forwarded_element(r, r->connection->client_ip);
+
+        if (existing && *existing) {
+            rpaf_forwarded_store(r, apr_pstrcat(r->pool, existing, ", ", element, NULL));
+        } else {
+            rpaf_forwarded_store(r, element);
+        }
+    }
+
     return DECLINED;
 }
 
@@ -879,11 +1096,33 @@ static const command_rec rpaf_cmds[] = {
                  RSRC_CONF,
                  "Which header to look for when trying to find the request id in a proxy setup"
                  ),
+    AP_INIT_FLAG(
+                 "RPAF_EnableForwarded",
+                 rpaf_enable_forwarded,
+                 NULL,
+                 RSRC_CONF,
+                 "Add an RFC 7239 Forwarded header describing this hop, replacing whatever the client sent if the request is not from trusted RPAF_ProxyIPs and appending to it if it is (only works if RPAF_Enable is enabled)"
+                 ),
+    AP_INIT_ITERATE(
+                 "RPAF_SanitizeHeaders",
+                 rpaf_add_sanitize_header,
+                 NULL,
+                 RSRC_CONF,
+                 "Request headers to remove unless the request comes from trusted RPAF_ProxyIPs, for headers a reverse proxy may set but a client must not be able to inject (only works if RPAF_Enable is enabled)"
+                 ),
     { NULL }
 };
 
 static int ssl_is_https(conn_rec *c) {
     return apr_table_get(c->notes, "rpaf_https") != NULL;
+}
+
+static int rpaf_post_config(apr_pool_t *pconf, apr_pool_t *plog, apr_pool_t *ptemp, server_rec *s) {
+    // by now every module has registered its optional functions, so this either
+    // gives us mod_ssl's implementation or, if mod_ssl is not loaded, the one
+    // registered below which reports the rpaf_https connection note
+    rpaf_forwarded_ssl_is_https = APR_RETRIEVE_OPTIONAL_FN(ssl_is_https);
+    return OK;
 }
 
 static void rpaf_register_hooks(apr_pool_t *p) {
@@ -894,6 +1133,8 @@ static void rpaf_register_hooks(apr_pool_t *p) {
     };
 
     ap_hook_post_read_request(rpaf_post_read_request, NULL, postread_afterme_list, APR_HOOK_REALLY_FIRST);
+
+    ap_hook_post_config(rpaf_post_config, NULL, NULL, APR_HOOK_MIDDLE);
 
     /* this will only work if mod_ssl is not loaded */
     if (APR_RETRIEVE_OPTIONAL_FN(ssl_is_https) == NULL)

@@ -1,0 +1,38 @@
+ARG BASE=debian:bookworm
+FROM ${BASE}
+
+ENV DEBIAN_FRONTEND=noninteractive
+
+RUN apt-get update \
+ && apt-get install -y --no-install-recommends \
+      apache2 apache2-dev build-essential curl ca-certificates openssl \
+ && rm -rf /var/lib/apt/lists/*
+
+COPY src/ /usr/src/mod_rpaf/
+WORKDIR /usr/src/mod_rpaf
+RUN make && install -m 0644 .libs/mod_rpaf.so /usr/lib/apache2/modules/mod_rpaf.so
+
+COPY files/rpaf.load /etc/apache2/mods-available/rpaf.load
+COPY files/rpaf.conf /etc/apache2/mods-available/rpaf.conf
+COPY files/000-test.conf /etc/apache2/sites-available/000-test.conf
+COPY files/single-worker.conf /etc/apache2/conf-available/single-worker.conf
+COPY files/001-ssl.conf /etc/apache2/sites-available/001-ssl.conf
+COPY files/env.sh /usr/lib/cgi-bin/env.sh
+COPY files/run-tests.sh /usr/local/bin/run-tests.sh
+
+RUN chmod 0755 /usr/lib/cgi-bin/env.sh /usr/local/bin/run-tests.sh \
+ && a2dismod mpm_event \
+ && a2enmod mpm_prefork \
+ && a2enmod rpaf cgi rewrite setenvif headers \
+ && a2dissite 000-default \
+ && a2ensite 000-test \
+ && a2ensite 001-ssl \
+ && mkdir -p /etc/ssl/test \
+ && openssl req -x509 -newkey rsa:2048 -nodes -days 3650 \
+      -subj "/CN=test.example" \
+      -keyout /etc/ssl/test/test.key -out /etc/ssl/test/test.crt 2>/dev/null \
+ && printf 'ServerName test.example\nUseCanonicalName Off\n' > /etc/apache2/conf-available/test-servername.conf \
+ && a2enconf test-servername \
+ && a2enconf single-worker
+
+ENTRYPOINT ["/usr/local/bin/run-tests.sh"]

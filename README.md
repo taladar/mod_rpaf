@@ -49,7 +49,50 @@ Sets `remoteip-proxy-ip-list` field in r->notes table to list of proxy intermedi
                                                       trusted RPAF_ProxyIPs; otherwise
                                                       cannot be done with Allow/Deny after
                                                       remote addr substitution
-                                                      
+
+    RPAF_EnableRequestId    (On|Off)                - Take the request id from the request
+                                                      id header if the request comes from a
+                                                      trusted RPAF_ProxyIPs, generate one
+                                                      otherwise, and expose it as the
+                                                      X_REQUEST_ID environment variable
+
+    RPAF_RequestIdHeader    X-Request-Id            - The header to use for the request id
+
+    RPAF_EnableForwarded    (On|Off)                - Maintain the RFC 7239 Forwarded
+                                                      request header (see below)
+
+    RPAF_SanitizeHeaders    X-Real-IP X-Forwarded-Host
+                                                    - Request headers to remove unless the
+                                                      request comes from a trusted
+                                                      RPAF_ProxyIPs, for headers a reverse
+                                                      proxy may legitimately set but a
+                                                      client must never be able to inject
+
+
+### RFC 7239 Forwarded support
+
+`RPAF_EnableForwarded On` makes the module maintain the standard
+[RFC 7239](https://www.rfc-editor.org/rfc/rfc7239.html) `Forwarded` request header
+in addition to, not instead of, the `X-Forwarded-*` headers. Applications behind
+the proxy can then evaluate the standard header and get a value they can trust:
+
+* request **not** from a trusted `RPAF_ProxyIPs`: whatever the client sent is
+  discarded and replaced by a single element describing that client
+* request from a trusted `RPAF_ProxyIPs`: the value received is kept and one
+  element for the hop to this server is appended, per RFC 7239 section 4
+
+The element looks like `for=192.0.2.1;proto=https;host="www.example.com";by=198.51.100.7`,
+with IPv6 node identifiers bracketed and quoted (`for="[2001:db8::1]"`) as required
+by RFC 7239 section 6. `proto` reflects what `RPAF_SetHTTPS` derived from the
+upstream headers, or a TLS connection terminated by this server.
+
+`RPAF_SanitizeHeaders` is independent of `RPAF_EnableForwarded` and covers the
+non-standard headers: anything listed there is removed from a request that did not
+come from a trusted proxy. Because the module runs in `post_read_request` at
+`APR_HOOK_REALLY_FIRST`, the headers are gone before `mod_setenvif` and friends
+run, so a configuration that derives e.g. `REMOTE_USER` from an
+`X-Forwarded-User` header set by an authenticating proxy cannot be fooled by a
+client that sets the header itself.
 
 ## Example Configuration
 
@@ -60,6 +103,15 @@ Sets `remoteip-proxy-ip-list` field in r->notes table to list of proxy intermedi
     RPAF_SetHTTPS           On
     RPAF_SetPort            On
     RPAF_ForbidIfNotProxy   Off
+    RPAF_EnableForwarded    On
+    RPAF_SanitizeHeaders    X-Forwarded-Host X-Forwarded-Server X-Forwarded-Ssl X-Real-IP
+    RPAF_SanitizeHeaders    X-Forwarded-User X-Forwarded-Email X-Forwarded-Groups
+
+## Tests
+
+`test/` holds a podman harness that runs a behaviour matrix against a real Apache
+and prints a normalised transcript, so a change can be diffed against the previous
+revision before it is packaged. See `test/README.md`.
 
 ## Authors
 

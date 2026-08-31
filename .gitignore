@@ -8,3 +8,5 @@
 debian/libapache2-mod-rpaf
 debian/files
 debian/libapache2-mod-rpaf.substvars
+test/src
+test/out-*
