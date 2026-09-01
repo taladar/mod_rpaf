@@ -2,10 +2,10 @@ Source: libapache2-mod-rpaf
 Maintainer: Sergey B Kirpichev <skirpichev@gmail.com>
 Section: httpd
 Priority: optional
-Standards-Version: 3.9.6
+Standards-Version: 4.3.0
 Build-Depends: apache2-dev, debhelper (>= 9), dh-apache2
-Vcs-Git: git://git.debian.org/git/collab-maint/libapache2-mod-rpaf.git
-Vcs-Browser: http://git.debian.org/?p=collab-maint/libapache2-mod-rpaf.git;a=summary
+Vcs-Git: https://github.com/taladar/mod_rpaf.git -b apache_2.4
+Vcs-Browser: https://github.com/taladar/mod_rpaf/tree/apache_2.4
 Homepage: http://stderr.net/apache/rpaf/
 
 Package: libapache2-mod-rpaf

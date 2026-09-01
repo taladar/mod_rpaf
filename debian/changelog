@@ -10,6 +10,13 @@ libapache2-mod-rpaf (0.8.4-1+wheezy1~saltation.21) UNRELEASED; urgency=medium
     based on them can no longer be fooled
   * add test/, a podman harness that diffs the behaviour matrix of a build
     against the previous revision
+  * point Vcs-Git and Vcs-Browser at our own fork instead of the git.debian.org
+    collab-maint repository, which has not existed since alioth was retired
+  * declare Standards-Version 4.3.0 rather than 3.9.6. Nothing in the package
+    needed changing for it, the field was simply never updated after the wheezy
+    era. Both this and the Vcs fields are lintian warnings and the source
+    package job runs lintian --fail-on-warnings, so they broke the build the
+    first time it ran since 2021, unrelated to the changes above.
 
  -- Matthias Hörmann <mhoermann@saltation.de>  Mon, 31 Aug 2026 15:56:46 +0200
 
