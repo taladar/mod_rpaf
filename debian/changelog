@@ -1,3 +1,24 @@
+libapache2-mod-rpaf (0.8.4-1+wheezy1~saltation.22) UNRELEASED; urgency=medium
+
+  * Non-maintainer upload.
+  * build with dh_apache2 --noscripts, so the package no longer ships a
+    postinst that runs "apache2_invoke enmod rpaf". On a saltweb host that
+    call always failed: saltweb manages apache modules through its own
+    modules-load/ and modules-conf/ directories and declares
+    /etc/apache2/mods-available purged, recursive and forced, holding only
+    UNUSED_JUST_FOR_APT_INSTALL, so the rpaf.load this package ships there is
+    deleted again and a2enmod cannot find the module. The postinst exited 1
+    and left the package half-configured, which blocks every later apt
+    operation on that host until someone clears it by hand.
+    The module is unaffected: saltweb loads it through its own
+    modules-load/rpaf.load. On a stock Debian host it now has to be enabled
+    with a2enmod rpaf, which is the right trade for a package only we install.
+    The upgrade path is safe - dh_apache2's prerm only runs dismod on remove
+    and deconfigure, not on upgrade, so upgrading from .20 or .21 runs no
+    maintainer script that can fail.
+
+ -- Matthias Hörmann <mhoermann@saltation.de>  Tue, 01 Sep 2026 13:10:00 +0200
+
 libapache2-mod-rpaf (0.8.4-1+wheezy1~saltation.21) UNRELEASED; urgency=medium
 
   * Non-maintainer upload.
