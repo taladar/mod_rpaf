@@ -5,9 +5,9 @@ libapache2-mod-rpaf (0.8.4-1+wheezy1~saltation.21) UNRELEASED; urgency=medium
     next to the existing X-Forwarded-* headers: replaced by our own element for
     requests that are not from a trusted RPAF_ProxyIPs, appended to for requests
     that are
-  * add RPAF_SanitizeHeaders to strip request headers a reverse proxy may set but
-    a client must not be able to inject, early enough that mod_setenvif rules
-    based on them can no longer be fooled
+  * add RPAF_SanitizeHeaders to strip request headers a reverse proxy may set
+    but a client must not be able to inject, early enough that mod_setenvif
+    rules based on them can no longer be fooled
   * add test/, a podman harness that diffs the behaviour matrix of a build
     against the previous revision
   * point Vcs-Git and Vcs-Browser at our own fork instead of the git.debian.org
